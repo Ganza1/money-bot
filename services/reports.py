@@ -170,13 +170,11 @@ def report_text(title, rows):
     for group, amount in groups.items():
         lines.append(f"{group_label(group)}: {format_amount(amount)}")
     rub_total = sum(amount for group, amount in groups.items() if group.endswith("RUB"))
-    usd_total = sum(amount for group, amount in groups.items() if group.endswith("USD"))
-    crypto_total = total - rub_total - usd_total
+    crypto_total = total - rub_total
     lines.extend(
         [
             "",
             f"🧮 Общий итог RUB: {format_amount(rub_total)}",
-            f"🧮 Общий итог USD: {format_amount(usd_total)}",
             f"🧮 Общий итог крипта: {format_amount(crypto_total)}",
             f"📌 Операций: {len(rows)}",
             "",

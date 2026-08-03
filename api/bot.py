@@ -360,8 +360,9 @@ def handle_callback(callback, telegram):
             sheets.set_state(chat_id, STATE_CRYPTO_CURRENCY, data)
             telegram.edit_message_text(chat_id, message_id, "💱 Уточните валюту:", reply_markup=crypto_keyboard())
         else:
-            sheets.set_state(chat_id, STATE_CURRENCY, data)
-            telegram.edit_message_text(chat_id, message_id, "💱 Выберите валюту:", reply_markup=currency_keyboard())
+            data["currency"] = CURRENCY_RUB
+            sheets.set_state(chat_id, STATE_AMOUNT, data)
+            telegram.edit_message_text(chat_id, message_id, "💰 Введите сумму.\nПример: 2500")
         return
 
     if data_value.startswith("crypto:") and state == STATE_CRYPTO_CURRENCY:

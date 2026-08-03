@@ -16,8 +16,7 @@ PAYMENT_CARD = "Безналичные"
 PAYMENT_CRYPTO = "Крипта"
 
 CURRENCY_RUB = "RUB"
-CURRENCY_USD = "USD"
-FIAT_CURRENCIES = (CURRENCY_RUB, CURRENCY_USD)
+FIAT_CURRENCIES = (CURRENCY_RUB,)
 
 CRYPTO_CURRENCIES = ("BTC", "ETH", "USDT")
 
@@ -39,8 +38,6 @@ STATUSES = (
 PAYMENT_GROUPS = (
     "Наличные RUB",
     "Безналичные RUB",
-    "Наличные USD",
-    "Безналичные USD",
     "BTC",
     "ETH",
     "USDT",
