@@ -1,0 +1,128 @@
+from states.constants import CATEGORIES, CRYPTO_CURRENCIES, FIAT_CURRENCIES, STATUSES
+
+
+def button(text, callback_data):
+    return {"text": text, "callback_data": callback_data}
+
+
+def inline_keyboard(rows):
+    return {"inline_keyboard": rows}
+
+
+def main_menu_keyboard():
+    return inline_keyboard(
+        [
+            [button("➕ Добавить расход", "cmd:add"), button("📊 Отчет", "cmd:report")],
+            [button("📜 История", "cmd:history"), button("🔁 Статус", "cmd:status")],
+            [button("ℹ Помощь", "cmd:help")],
+        ]
+    )
+
+
+def payment_keyboard():
+    return inline_keyboard(
+        [
+            [button("💵 Наличные", "payment:cash")],
+            [button("🏦 Безналичные", "payment:card")],
+            [button("₿ Крипта", "payment:crypto")],
+            [button("❌ Отмена", "flow:cancel")],
+        ]
+    )
+
+
+def crypto_keyboard():
+    return inline_keyboard(
+        [
+            [button("₿ BTC", "crypto:BTC"), button("⟠ ETH", "crypto:ETH"), button("💵 USDT", "crypto:USDT")],
+            [button("❌ Отмена", "flow:cancel")],
+        ]
+    )
+
+
+def currency_keyboard():
+    emoji = {
+        "RUB": "₽",
+        "USD": "$",
+    }
+    rows = [[button(f"{emoji.get(currency, '')} {currency}".strip(), f"currency:{currency}")] for currency in FIAT_CURRENCIES]
+    rows.append([button("❌ Отмена", "flow:cancel")])
+    return inline_keyboard(rows)
+
+
+def category_keyboard():
+    emoji = {
+        "Подписки": "💳",
+        "Зарплата": "💰",
+        "Офис": "🏢",
+        "Обучение": "🎓",
+        "Маркетинг": "📢",
+        "Прочее": "📁",
+    }
+    rows = [[button(f"{emoji.get(category, '')} {category}".strip(), f"category:{category}")] for category in CATEGORIES]
+    rows.append([button("❌ Отмена", "flow:cancel")])
+    return inline_keyboard(rows)
+
+
+def status_keyboard(prefix="status"):
+    emoji = {
+        "Оплачен": "✅",
+        "На рассмотрении": "⏳",
+        "Отказ": "❌",
+    }
+    rows = [[button(f"{emoji.get(status, '')} {status}".strip(), f"{prefix}:{status}")] for status in STATUSES]
+    rows.append([button("❌ Отмена", "flow:cancel")])
+    return inline_keyboard(rows)
+
+
+def status_records_keyboard(items):
+    rows = []
+    for index, item in enumerate(items, start=1):
+        record = item["record"]
+        date_time = record.get("Дата и время", "")
+        amount = record.get("Сумма", "")
+        currency = record.get("Валюта", "") or "RUB"
+        description = record.get("Описание", "")
+        status = record.get("Статус", "") or "без статуса"
+        owner = record.get("Chat ID", "")
+        label = f"{index}. {date_time} | {amount} {currency} | {description} | {status} | {owner}"
+        if len(label) > 60:
+            label = label[:57] + "..."
+        rows.append([button(label, f"status_row:{item['row_number']}")])
+    rows.append([button("❌ Отмена", "flow:cancel")])
+    return inline_keyboard(rows)
+
+
+def confirm_keyboard():
+    return inline_keyboard(
+        [
+            [button("✅ Сохранить", "confirm:save")],
+            [button("❌ Отмена", "confirm:cancel")],
+        ]
+    )
+
+
+def saved_keyboard():
+    return inline_keyboard(
+        [
+            [button("↩️ Отменить запись", "undo:saved")],
+            [button("➕ Добавить еще", "cmd:add")],
+        ]
+    )
+
+
+def report_keyboard():
+    return inline_keyboard(
+        [
+            [button("Сегодня", "report:today"), button("7 дней", "report:week")],
+            [button("Месяц", "report:month")],
+        ]
+    )
+
+
+def delete_confirm_keyboard():
+    return inline_keyboard(
+        [
+            [button("✅ Удалить", "delete:confirm")],
+            [button("❌ Отмена", "delete:cancel")],
+        ]
+    )

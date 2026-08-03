@@ -1,0 +1,18 @@
+{
+  "framework": null,
+  "functions": {
+    "api/*.py": {
+      "maxDuration": 60
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/weekly_report",
+      "schedule": "0 14 * * 5"
+    },
+    {
+      "path": "/api/monthly_report",
+      "schedule": "0 14 1 * *"
+    }
+  ]
+}
