@@ -12,6 +12,7 @@ from keyboards.inline import (
     crypto_keyboard,
     delete_confirm_keyboard,
     main_menu_keyboard,
+    operation_type_keyboard,
     payment_keyboard,
     report_keyboard,
     saved_keyboard,
@@ -23,6 +24,8 @@ from services.telegram import TelegramClient, TelegramError
 from states.constants import (
     CURRENCY_RUB,
     FIAT_CURRENCIES,
+    OPERATION_EXPENSE,
+    OPERATION_INCOME,
     PAYMENT_CARD,
     PAYMENT_CASH,
     PAYMENT_CRYPTO,
@@ -38,6 +41,7 @@ from states.constants import (
     STATE_STATUS,
     STATE_STATUS_UPDATE,
     STATE_UNDO_SAVED,
+    STATE_OPERATION_TYPE,
 )
 
 
@@ -100,8 +104,8 @@ def row_number_from_append_result(result):
 
 
 def start_add_flow(chat_id, telegram):
-    sheets.set_state(chat_id, STATE_PAYMENT_TYPE, {})
-    telegram.send_message(chat_id, "💳 Выберите способ оплаты:", reply_markup=payment_keyboard())
+    sheets.set_state(chat_id, STATE_OPERATION_TYPE, {})
+    telegram.send_message(chat_id, "📌 Выберите тип операции:", reply_markup=operation_type_keyboard())
 
 
 def start_status_update_flow(chat_id, telegram):
@@ -133,7 +137,7 @@ def send_help(chat_id, telegram):
         "\n".join(
             [
                 "📋 Команды:",
-                "➕ /add - добавить расход",
+                "➕ /add - добавить операцию",
                 "📅 /today - отчет за сегодня",
                 "🗓️ /week - отчет за последние 7 дней",
                 "📆 /month - отчет за текущий месяц",
@@ -167,16 +171,18 @@ def build_expense(data, chat_id):
         "Timezone": tz_name,
         "Кошелек": data.get("crypto_wallet", ""),
         "Валюта": data.get("currency", CURRENCY_RUB) if data.get("payment_type") != PAYMENT_CRYPTO else "",
+        "Тип операции": data.get("operation_type", OPERATION_EXPENSE),
     }
 
 
 def expense_notification_text(expense, row_number=None):
-    lines = ["🆕 Создана новая оплата"]
+    lines = ["🆕 Создана новая операция"]
     if row_number:
         lines.append(f"📌 Строка: {row_number}")
     lines.extend(
         [
             f"🕒 Дата и время: {expense.get('Дата и время')}",
+            f"📌 Тип операции: {expense.get('Тип операции')}",
             f"💳 Тип оплаты: {expense.get('Тип оплаты')}",
         ]
     )
@@ -346,6 +352,22 @@ def handle_callback(callback, telegram):
             start, end = reports.current_month_range(tz_name)
             text = reports.build_period_report(rows, "Отчет за текущий месяц", start, end, tz_name, chat_id)
         telegram.send_message(chat_id, text)
+        return
+
+    if data_value.startswith("operation:") and state == STATE_OPERATION_TYPE:
+        selected = data_value.split(":", 1)[1]
+        operation_map = {"income": OPERATION_INCOME, "expense": OPERATION_EXPENSE}
+        data["operation_type"] = operation_map.get(selected)
+        if not data["operation_type"]:
+            telegram.send_message(chat_id, "Не удалось распознать тип операции. Попробуйте /add заново.")
+            sheets.clear_state(chat_id)
+            return
+        if data["operation_type"] == OPERATION_INCOME and not is_admin_chat(chat_id):
+            telegram.send_message(chat_id, "🔒 Доход может вносить только администратор.")
+            start_add_flow(chat_id, telegram)
+            return
+        sheets.set_state(chat_id, STATE_PAYMENT_TYPE, data)
+        telegram.edit_message_text(chat_id, message_id, "💳 Выберите способ оплаты:", reply_markup=payment_keyboard())
         return
 
     if data_value.startswith("payment:") and state == STATE_PAYMENT_TYPE:

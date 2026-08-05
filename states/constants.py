@@ -1,3 +1,4 @@
+STATE_OPERATION_TYPE = "operation_type"
 STATE_PAYMENT_TYPE = "payment_type"
 STATE_CRYPTO_CURRENCY = "crypto_currency"
 STATE_CRYPTO_WALLET = "crypto_wallet"
@@ -10,6 +11,9 @@ STATE_CONFIRM = "confirm"
 STATE_DELETE_CONFIRM = "delete_confirm"
 STATE_STATUS_UPDATE = "status_update"
 STATE_UNDO_SAVED = "undo_saved"
+
+OPERATION_INCOME = "Доход"
+OPERATION_EXPENSE = "Расход"
 
 PAYMENT_CASH = "Наличные"
 PAYMENT_CARD = "Безналичные"

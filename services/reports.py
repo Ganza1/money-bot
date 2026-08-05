@@ -3,7 +3,7 @@ from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 from zoneinfo import ZoneInfo
 
-from states.constants import CURRENCY_RUB, FIAT_CURRENCIES, PAYMENT_GROUPS, STATUSES
+from states.constants import CURRENCY_RUB, FIAT_CURRENCIES, OPERATION_EXPENSE, OPERATION_INCOME, PAYMENT_GROUPS, STATUSES
 
 
 STATUS_EMOJI = {
@@ -94,6 +94,15 @@ def amount_with_currency(row):
     return f"{amount} {currency}".strip()
 
 
+def operation_type(row):
+    value = str(row.get("Тип операции", "")).strip()
+    return value if value in (OPERATION_INCOME, OPERATION_EXPENSE) else OPERATION_EXPENSE
+
+
+def operation_sign(row):
+    return Decimal("1") if operation_type(row) == OPERATION_INCOME else Decimal("-1")
+
+
 def filter_rows(rows, start_dt, end_dt, tz_name, chat_id=None):
     result = []
     for row in rows:
@@ -107,15 +116,22 @@ def filter_rows(rows, start_dt, end_dt, tz_name, chat_id=None):
 
 def summarize(rows):
     groups = OrderedDict((group, Decimal("0")) for group in PAYMENT_GROUPS)
-    total = Decimal("0")
+    income_total = Decimal("0")
+    expense_total = Decimal("0")
+    net_total = Decimal("0")
     for row in rows:
         amount = parse_amount(row.get("Сумма"))
+        signed_amount = amount * operation_sign(row)
         group = payment_group(row)
         if group not in groups:
             groups[group] = Decimal("0")
-        groups[group] += amount
-        total += amount
-    return groups, total
+        groups[group] += signed_amount
+        if operation_type(row) == OPERATION_INCOME:
+            income_total += amount
+        else:
+            expense_total += amount
+        net_total += signed_amount
+    return groups, income_total, expense_total, net_total
 
 
 def summarize_statuses(rows):
@@ -127,15 +143,16 @@ def summarize_statuses(rows):
         if status not in groups:
             groups[status] = Decimal("0")
             counts[status] = 0
-        groups[status] += parse_amount(row.get("Сумма"))
+        groups[status] += parse_amount(row.get("Сумма")) * operation_sign(row)
         counts[status] += 1
     return groups, counts
 
 
 def format_expense_line(row):
     group = payment_group(row)
+    op_emoji = "📈" if operation_type(row) == OPERATION_INCOME else "📉"
     return (
-        f"🕒 {row.get('Дата и время')} | {group_label(group)} | 🏷️ {row.get('Категория')} | "
+        f"🕒 {row.get('Дата и время')} | {op_emoji} {operation_type(row)} | {group_label(group)} | 🏷️ {row.get('Категория')} | "
         f"💰 {amount_with_currency(row)} | 📝 {row.get('Описание')}"
     )
 
@@ -164,16 +181,18 @@ def pending_and_rejected_text(rows):
 
 
 def report_text(title, rows):
-    groups, total = summarize(rows)
+    groups, income_total, expense_total, net_total = summarize(rows)
     status_groups, status_counts = summarize_statuses(rows)
     lines = [f"📊 {title}", ""]
     for group, amount in groups.items():
         lines.append(f"{group_label(group)}: {format_amount(amount)}")
     rub_total = sum(amount for group, amount in groups.items() if group.endswith("RUB"))
-    crypto_total = total - rub_total
+    crypto_total = net_total - rub_total
     lines.extend(
         [
             "",
+            f"📈 Доходы всего: {format_amount(income_total)}",
+            f"📉 Расходы всего: {format_amount(expense_total)}",
             f"🧮 Общий итог RUB: {format_amount(rub_total)}",
             f"🧮 Общий итог крипта: {format_amount(crypto_total)}",
             f"📌 Операций: {len(rows)}",

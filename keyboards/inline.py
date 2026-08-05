@@ -1,4 +1,4 @@
-from states.constants import CATEGORIES, CRYPTO_CURRENCIES, FIAT_CURRENCIES, STATUSES
+from states.constants import CATEGORIES, CRYPTO_CURRENCIES, FIAT_CURRENCIES, OPERATION_EXPENSE, OPERATION_INCOME, STATUSES
 
 
 def button(text, callback_data):
@@ -12,9 +12,19 @@ def inline_keyboard(rows):
 def main_menu_keyboard():
     return inline_keyboard(
         [
-            [button("➕ Добавить расход", "cmd:add"), button("📊 Отчет", "cmd:report")],
+            [button("➕ Добавить операцию", "cmd:add"), button("📊 Отчет", "cmd:report")],
             [button("📜 История", "cmd:history"), button("🔁 Статус", "cmd:status")],
             [button("ℹ Помощь", "cmd:help")],
+        ]
+    )
+
+
+def operation_type_keyboard():
+    return inline_keyboard(
+        [
+            [button(f"📈 {OPERATION_INCOME}", "operation:income")],
+            [button(f"📉 {OPERATION_EXPENSE}", "operation:expense")],
+            [button("❌ Отмена", "flow:cancel")],
         ]
     )
 
