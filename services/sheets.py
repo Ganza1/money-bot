@@ -1,6 +1,7 @@
 import json
 import os
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -42,6 +43,9 @@ LEGACY_EXPENSE_HEADERS = [
 ]
 
 STATE_HEADERS = ["Chat ID", "State", "Data JSON", "Updated At"]
+SHIFTED_OPERATION_TYPES = {"Доход", "Расход", "Перевод"}
+SHIFTED_PAYMENT_TYPES = {"Карта", "Наличные", "Безналичные"}
+SHIFTED_STATUSES = {"Оплачен", "На рассмотрении", "Отказ"}
 
 CANONICAL_ALIASES = {
     "Тип оплаты": ("Тип оплаты", "Источник"),
@@ -202,6 +206,37 @@ def _records_from_values(rows):
     return records
 
 
+def _is_decimal(value):
+    text = str(value or "").replace(" ", "").replace(",", ".").strip()
+    if not text:
+        return False
+    try:
+        Decimal(text)
+        return True
+    except InvalidOperation:
+        return False
+
+
+def _looks_like_shifted_money_row(record):
+    operation = str(record.get("Категория", "")).strip()
+    payment = str(record.get("Описание", "")).strip()
+    amount = str(record.get("Chat ID", "")).strip()
+    return operation in SHIFTED_OPERATION_TYPES and payment in SHIFTED_PAYMENT_TYPES and _is_decimal(amount)
+
+
+def _restore_shifted_money_row(record):
+    raw_status = str(record.get("Статус", "")).strip()
+    restored = dict(record)
+    restored["Тип операции"] = str(record.get("Категория", "")).strip()
+    restored["Тип оплаты"] = str(record.get("Описание", "")).strip()
+    restored["Сумма"] = str(record.get("Chat ID", "")).strip()
+    restored["Описание"] = raw_status
+    restored["Категория"] = ""
+    restored["Статус"] = raw_status if raw_status in SHIFTED_STATUSES else "Оплачен"
+    restored["Chat ID"] = ""
+    return restored
+
+
 def _record_from_row(row, headers=None):
     headers = headers or (LEGACY_EXPENSE_HEADERS if len(row) > len(EXPENSE_HEADERS) else EXPENSE_HEADERS)
     padded = row + [""] * (len(headers) - len(row))
@@ -210,6 +245,8 @@ def _record_from_row(row, headers=None):
     for header in EXPENSE_HEADERS:
         aliases = CANONICAL_ALIASES.get(header, (header,))
         record[header] = next((raw.get(alias, "") for alias in aliases if raw.get(alias, "") != ""), "")
+    if _looks_like_shifted_money_row(record):
+        record = _restore_shifted_money_row(record)
     if not record.get("Тип операции"):
         record["Тип операции"] = "Расход"
     return record
