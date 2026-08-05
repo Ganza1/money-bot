@@ -42,9 +42,19 @@ LEGACY_EXPENSE_HEADERS = [
 ]
 
 STATE_HEADERS = ["Chat ID", "State", "Data JSON", "Updated At"]
-CHAT_ID_INDEX = EXPENSE_HEADERS.index("Chat ID")
-STATUS_INDEX = EXPENSE_HEADERS.index("Статус")
-LEGACY_STATUS_INDEX = LEGACY_EXPENSE_HEADERS.index("Статус")
+
+CANONICAL_ALIASES = {
+    "Тип оплаты": ("Тип оплаты", "Источник"),
+    "Chat ID": ("Chat ID", "User ID"),
+}
+
+APPEND_ALIASES = {
+    "Источник": "Тип оплаты",
+    "User ID": "Chat ID",
+    "Валюта": "currency",
+    "Криптовалюта": "",
+    "Кошелек": "",
+}
 
 
 class SheetsError(RuntimeError):
@@ -94,7 +104,7 @@ def _summary_worksheet(spreadsheet):
     try:
         return spreadsheet.worksheet(SUMMARY_SHEET)
     except gspread.WorksheetNotFound:
-        return spreadsheet.add_worksheet(title=SUMMARY_SHEET, rows=100, cols=6)
+        return spreadsheet.add_worksheet(title=SUMMARY_SHEET, rows=20, cols=3)
 
 
 def _operations_worksheet(spreadsheet):
@@ -104,6 +114,19 @@ def _operations_worksheet(spreadsheet):
         worksheet = spreadsheet.add_worksheet(title=EXPENSES_SHEET, rows=1000, cols=len(EXPENSE_HEADERS))
         worksheet.update("A1", [EXPENSE_HEADERS])
     return worksheet
+
+
+def _sheet_headers(rows):
+    headers = [str(cell).strip() for cell in rows[0]] if rows else []
+    return headers or EXPENSE_HEADERS
+
+
+def _headers_for_append(worksheet):
+    headers = [str(cell).strip() for cell in worksheet.row_values(1)]
+    if not headers:
+        worksheet.update("A1", [EXPENSE_HEADERS])
+        return EXPENSE_HEADERS
+    return headers
 
 
 def get_expenses_sheet():
@@ -130,7 +153,7 @@ def debug_info():
     operation_rows = operations.get_all_values()
     state_rows = states.get_all_values()
     summary_rows = summary.get_all_values()
-    headers = operation_rows[0] if operation_rows else []
+    headers = _sheet_headers(operation_rows)
     return {
         "sheet_id": os.environ.get("GOOGLE_SHEET_ID", ""),
         "operations_sheet": EXPENSES_SHEET,
@@ -142,9 +165,23 @@ def debug_info():
     }
 
 
+def _append_value(expense, header):
+    if header in expense:
+        return expense.get(header, "")
+    alias = APPEND_ALIASES.get(header)
+    if alias is None:
+        return ""
+    if not alias:
+        return ""
+    if alias == "currency":
+        return expense.get("Валюта", "RUB") or "RUB"
+    return expense.get(alias, "")
+
+
 def append_expense(expense):
     worksheet = get_expenses_sheet()
-    row = [expense.get(header, "") for header in EXPENSE_HEADERS]
+    headers = _headers_for_append(worksheet)
+    row = [_append_value(expense, header) for header in headers]
     result = worksheet.append_row(row, value_input_option="USER_ENTERED")
     _try_update_summary()
     return result
@@ -155,24 +192,34 @@ def all_expenses():
 
 
 def _records_from_values(rows):
+    if not rows:
+        return []
+    headers = _sheet_headers(rows)
     records = []
     for row in rows[1:]:
         if any(str(cell).strip() for cell in row):
-            records.append(_record_from_row(row))
+            records.append(_record_from_row(row, headers=headers))
     return records
 
 
-def _record_from_row(row):
-    headers = LEGACY_EXPENSE_HEADERS if len(row) > len(EXPENSE_HEADERS) else EXPENSE_HEADERS
+def _record_from_row(row, headers=None):
+    headers = headers or (LEGACY_EXPENSE_HEADERS if len(row) > len(EXPENSE_HEADERS) else EXPENSE_HEADERS)
     padded = row + [""] * (len(headers) - len(row))
-    record = dict(zip(headers, padded))
-    return {header: record.get(header, "") for header in EXPENSE_HEADERS}
+    raw = dict(zip(headers, padded))
+    record = {}
+    for header in EXPENSE_HEADERS:
+        aliases = CANONICAL_ALIASES.get(header, (header,))
+        record[header] = next((raw.get(alias, "") for alias in aliases if raw.get(alias, "") != ""), "")
+    if not record.get("Тип операции"):
+        record["Тип операции"] = "Расход"
+    return record
 
 
-def _status_column_for_row(row):
-    if len(row) > len(EXPENSE_HEADERS):
-        return LEGACY_STATUS_INDEX + 1
-    return STATUS_INDEX + 1
+def _status_column_from_headers(headers):
+    try:
+        return headers.index("Статус") + 1
+    except ValueError:
+        return EXPENSE_HEADERS.index("Статус") + 1
 
 
 def _try_update_summary():
@@ -233,10 +280,10 @@ def clear_state(chat_id):
 def find_last_expense_row(chat_id):
     worksheet = get_expenses_sheet()
     rows = worksheet.get_all_values()
+    headers = _sheet_headers(rows)
     chat_id = str(chat_id)
     for index in range(len(rows), 1, -1):
-        row = rows[index - 1]
-        record = _record_from_row(row)
+        record = _record_from_row(rows[index - 1], headers=headers)
         if str(record.get("Chat ID", "")) == chat_id:
             return index, record
     return None, None
@@ -245,11 +292,11 @@ def find_last_expense_row(chat_id):
 def recent_expense_rows(chat_id, limit=10, include_all=False):
     worksheet = get_expenses_sheet()
     rows = worksheet.get_all_values()
+    headers = _sheet_headers(rows)
     chat_id = str(chat_id)
     result = []
     for index in range(len(rows), 1, -1):
-        row = rows[index - 1]
-        record = _record_from_row(row)
+        record = _record_from_row(rows[index - 1], headers=headers)
         if include_all or str(record.get("Chat ID", "")) == chat_id:
             result.append({"row_number": index, "record": record})
             if len(result) >= limit:
@@ -264,21 +311,24 @@ def delete_expense_row(row_number):
 
 def get_expense_row(row_number):
     worksheet = get_expenses_sheet()
-    row = worksheet.row_values(int(row_number))
-    if not row:
+    rows = worksheet.get_all_values()
+    row_number = int(row_number)
+    if row_number < 1 or row_number > len(rows):
         return None
-    return _record_from_row(row)
+    return _record_from_row(rows[row_number - 1], headers=_sheet_headers(rows))
 
 
 def update_expense_status(row_number, chat_id, status, allow_any=False):
     worksheet = get_expenses_sheet()
-    row = worksheet.row_values(int(row_number))
-    if not row:
+    rows = worksheet.get_all_values()
+    headers = _sheet_headers(rows)
+    row_number = int(row_number)
+    if row_number < 1 or row_number > len(rows):
         return False
-    current = _record_from_row(row)
+    current = _record_from_row(rows[row_number - 1], headers=headers)
     if not allow_any and str(current.get("Chat ID", "")) != str(chat_id):
         return False
-    worksheet.update_cell(int(row_number), _status_column_for_row(row), status)
+    worksheet.update_cell(row_number, _status_column_from_headers(headers), status)
     _try_update_summary()
     return True
 

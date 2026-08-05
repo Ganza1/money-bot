@@ -269,9 +269,8 @@ def report_text(title, rows):
 
 def summary_sheet_values(rows):
     summary = summarize(rows)
-    status_groups, status_counts = summarize_statuses(rows)
     updated_at = now_in_timezone("Europe/Moscow").strftime("%Y-%m-%d %H:%M:%S")
-    values = [
+    return [
         ["Показатель", "Сумма, ₽", "Комментарий"],
         ["Остаток на карте", format_amount(summary["card_balance"]), "Оплаченные операции"],
         ["Остаток наличных", format_amount(summary["cash_balance"]), "Оплаченные операции"],
@@ -281,16 +280,9 @@ def summary_sheet_values(rows):
         ["Расходы всего", format_amount(summary["expense_total"]), "Только статус Оплачен"],
         ["Итог доходы-расходы", format_amount(summary["net_total"]), "Переводы не меняют итог"],
         ["Переводы", format_amount(summary["transfer_total"]), f"Операций: {summary['transfer_count']}"],
-        ["Операций всего", len(rows), "Все статусы"],
+        ["Операций всего", len(rows), "Все строки Operations"],
         ["Обновлено", updated_at, "Europe/Moscow"],
-        [],
-        ["Статус", "Сумма, ₽", "Количество"],
     ]
-    for status, amount in status_groups.items():
-        count = status_counts.get(status, 0)
-        if count:
-            values.append([status, format_amount(amount), count])
-    return values
 
 
 def today_range(tz_name):
