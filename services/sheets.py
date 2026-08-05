@@ -4,6 +4,7 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
 import gspread
+from gspread.utils import rowcol_to_a1
 from google.oauth2.service_account import Credentials
 
 
@@ -237,7 +238,7 @@ def _restore_shifted_money_row(record):
     return restored
 
 
-def _record_from_row(row, headers=None):
+def _raw_record_from_row(row, headers=None):
     headers = headers or (LEGACY_EXPENSE_HEADERS if len(row) > len(EXPENSE_HEADERS) else EXPENSE_HEADERS)
     padded = row + [""] * (len(headers) - len(row))
     raw = dict(zip(headers, padded))
@@ -245,6 +246,13 @@ def _record_from_row(row, headers=None):
     for header in EXPENSE_HEADERS:
         aliases = CANONICAL_ALIASES.get(header, (header,))
         record[header] = next((raw.get(alias, "") for alias in aliases if raw.get(alias, "") != ""), "")
+    if not record.get("Тип операции"):
+        record["Тип операции"] = "Расход"
+    return record
+
+
+def _record_from_row(row, headers=None):
+    record = _raw_record_from_row(row, headers=headers)
     if _looks_like_shifted_money_row(record):
         record = _restore_shifted_money_row(record)
     if not record.get("Тип операции"):
@@ -257,6 +265,64 @@ def _status_column_from_headers(headers):
         return headers.index("Статус") + 1
     except ValueError:
         return EXPENSE_HEADERS.index("Статус") + 1
+
+
+def _column_number(headers, header):
+    try:
+        return headers.index(header) + 1
+    except ValueError:
+        return None
+
+
+def _repair_value_for_header(record, header):
+    if header == "Категория":
+        return ""
+    if header == "Описание":
+        return record.get("Описание", "")
+    if header == "Сумма":
+        return record.get("Сумма", "")
+    if header in ("Тип оплаты", "Источник"):
+        return record.get("Тип оплаты", "")
+    if header == "Статус":
+        return record.get("Статус", "")
+    if header in ("Chat ID", "User ID"):
+        return record.get("Chat ID", "")
+    if header == "Тип операции":
+        return record.get("Тип операции", "")
+    return None
+
+
+def repair_shifted_operation_rows():
+    worksheet = get_expenses_sheet()
+    rows = worksheet.get_all_values()
+    if not rows:
+        return {"checked": 0, "fixed": 0}
+
+    headers = _sheet_headers(rows)
+    fixed = 0
+    checked = 0
+    for row_number, row in enumerate(rows[1:], start=2):
+        checked += 1
+        raw_record = _raw_record_from_row(row, headers=headers)
+        if not _looks_like_shifted_money_row(raw_record):
+            continue
+
+        restored = _restore_shifted_money_row(raw_record)
+        updates = []
+        for header in headers:
+            value = _repair_value_for_header(restored, header)
+            if value is None:
+                continue
+            column = _column_number(headers, header)
+            if column:
+                updates.append({"range": rowcol_to_a1(row_number, column), "values": [[value]]})
+        if updates:
+            worksheet.batch_update(updates, value_input_option="USER_ENTERED")
+            fixed += 1
+
+    if fixed:
+        _try_update_summary()
+    return {"checked": checked, "fixed": fixed}
 
 
 def _try_update_summary():

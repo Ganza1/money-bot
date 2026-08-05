@@ -140,6 +140,7 @@ def send_help(chat_id, telegram):
                 "🕒 /time - текущее время Europe/Moscow",
                 "🆔 /id - показать chat_id",
                 "🛠️ /debug - диагностика для администратора",
+                "🧹 /repair_operations - исправить сдвинутые строки Operations",
             ]
         ),
     )
@@ -266,6 +267,21 @@ def handle_command(chat_id, command, telegram):
         telegram.send_message(chat_id, f"{now.strftime('%Y-%m-%d %H:%M:%S')} {tz_name}")
     elif command == "/id":
         telegram.send_message(chat_id, f"🆔 Ваш chat_id: {chat_id}")
+    elif command == "/repair_operations":
+        if not is_admin_chat(chat_id):
+            telegram.send_message(chat_id, "🔒 Исправление таблицы доступно только администратору.")
+            return
+        try:
+            result = sheets.repair_shifted_operation_rows()
+            telegram.send_message(
+                chat_id,
+                "🧹 Проверка Operations завершена.\n"
+                f"🔎 Проверено строк: {result['checked']}\n"
+                f"✅ Исправлено строк: {result['fixed']}\n"
+                "📊 Вкладка Итоги пересчитана.",
+            )
+        except Exception as exc:
+            telegram.send_message(chat_id, f"⚠️ Ошибка исправления Operations: {type(exc).__name__}: {str(exc)[:600]}")
     elif command == "/debug":
         if not is_admin_chat(chat_id):
             telegram.send_message(
