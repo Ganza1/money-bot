@@ -272,24 +272,24 @@ def summary_sheet_values(rows):
     status_groups, status_counts = summarize_statuses(rows)
     updated_at = now_in_timezone("Europe/Moscow").strftime("%Y-%m-%d %H:%M:%S")
     values = [
-        ["Итоги", "Значение", "Комментарий"],
-        ["Обновлено", updated_at, "Europe/Moscow"],
-        ["Доходы всего", format_amount(summary["income_total"]), "Только Оплачен"],
-        ["Расходы всего", format_amount(summary["expense_total"]), "Только Оплачен"],
-        ["Общий итог", format_amount(summary["net_total"]), "Доходы - Расходы"],
-        ["Баланс карты", format_amount(summary["card_balance"]), "Только Оплачен"],
-        ["Баланс наличных", format_amount(summary["cash_balance"]), "Только Оплачен"],
-        ["Общий баланс", format_amount(summary["total_balance"]), "Карта + Наличные"],
+        ["Показатель", "Сумма, ₽", "Комментарий"],
+        ["Остаток на карте", format_amount(summary["card_balance"]), "Оплаченные операции"],
+        ["Остаток наличных", format_amount(summary["cash_balance"]), "Оплаченные операции"],
+        ["Общий остаток", format_amount(summary["total_balance"]), "Карта + наличные"],
+        [],
+        ["Доходы всего", format_amount(summary["income_total"]), "Только статус Оплачен"],
+        ["Расходы всего", format_amount(summary["expense_total"]), "Только статус Оплачен"],
+        ["Итог доходы-расходы", format_amount(summary["net_total"]), "Переводы не меняют итог"],
         ["Переводы", format_amount(summary["transfer_total"]), f"Операций: {summary['transfer_count']}"],
         ["Операций всего", len(rows), "Все статусы"],
+        ["Обновлено", updated_at, "Europe/Moscow"],
         [],
-        ["Статус", "Сумма", "Количество"],
+        ["Статус", "Сумма, ₽", "Количество"],
     ]
     for status, amount in status_groups.items():
-        values.append([status, format_amount(amount), status_counts.get(status, 0)])
-    values.extend([[], ["Источник", "Баланс", "Комментарий"]])
-    for group, amount in summary["groups"].items():
-        values.append([group, format_amount(amount), "Только Оплачен"] )
+        count = status_counts.get(status, 0)
+        if count:
+            values.append([status, format_amount(amount), count])
     return values
 
 

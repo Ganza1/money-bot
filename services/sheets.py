@@ -102,16 +102,7 @@ def _operations_worksheet(spreadsheet):
         worksheet = spreadsheet.worksheet(EXPENSES_SHEET)
     except gspread.WorksheetNotFound:
         worksheet = spreadsheet.add_worksheet(title=EXPENSES_SHEET, rows=1000, cols=len(EXPENSE_HEADERS))
-
-    rows = worksheet.get_all_values()
-    needs_migration = (not rows) or rows[0] != EXPENSE_HEADERS or any(len(row) > len(EXPENSE_HEADERS) for row in rows[1:])
-    if needs_migration:
-        records = _records_from_values(rows) if rows else []
-        values = [EXPENSE_HEADERS]
-        values.extend([record.get(header, "") for header in EXPENSE_HEADERS] for record in records)
-        worksheet.clear()
-        worksheet.resize(rows=max(len(values), 1000), cols=len(EXPENSE_HEADERS))
-        worksheet.update("A1", values, value_input_option="USER_ENTERED")
+        worksheet.update("A1", [EXPENSE_HEADERS])
     return worksheet
 
 
