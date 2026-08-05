@@ -6,7 +6,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 
-EXPENSES_SHEET = "Expenses"
+EXPENSES_SHEET = "Operations"
 STATES_SHEET = "States"
 
 EXPENSE_HEADERS = [

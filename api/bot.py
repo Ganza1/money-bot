@@ -473,7 +473,7 @@ def handle_callback(callback, telegram):
         else:
             sheets.clear_state(chat_id)
         notify_admin_about_expense(telegram, expense, row_number=row_number)
-        telegram.edit_message_text(chat_id, message_id, "✅ Запись сохранена в лист Expenses.", reply_markup=saved_keyboard())
+        telegram.edit_message_text(chat_id, message_id, "✅ Запись сохранена в лист Operations.", reply_markup=saved_keyboard())
         return
 
     if data_value == "undo:saved" and state == STATE_UNDO_SAVED:
@@ -481,7 +481,7 @@ def handle_callback(callback, telegram):
         expense = data.get("expense", {})
         if row_number and expense and sheets.delete_expense_row_if_matches(int(row_number), expense):
             sheets.clear_state(chat_id)
-            telegram.edit_message_text(chat_id, message_id, "↩️ Запись отменена и удалена из Expenses.")
+            telegram.edit_message_text(chat_id, message_id, "↩️ Запись отменена и удалена из Operations.")
         else:
             sheets.clear_state(chat_id)
             telegram.edit_message_text(chat_id, message_id, "⚠️ Не удалось отменить запись: она уже изменена или удалена.")
