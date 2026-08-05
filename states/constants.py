@@ -1,5 +1,7 @@
 STATE_OPERATION_TYPE = "operation_type"
 STATE_PAYMENT_TYPE = "payment_type"
+STATE_BANK = "bank"
+STATE_CARD_PHONE = "card_phone"
 STATE_AMOUNT = "amount"
 STATE_DESCRIPTION = "description"
 STATE_CATEGORY = "category"
@@ -17,6 +19,16 @@ PAYMENT_CASH = "Наличные"
 PAYMENT_CARD = "Карта"
 
 CURRENCY_RUB = "RUB"
+
+BANKS = (
+    "Сбербанк",
+    "ВТБ",
+    "Газпромбанк",
+    "Альфа-Банк",
+    "Промсвязьбанк",
+    "Совкомбанк",
+    "Т-Банк",
+)
 
 CATEGORIES = (
     "Подписки",

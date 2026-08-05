@@ -1,4 +1,4 @@
-from states.constants import CATEGORIES, OPERATION_EXPENSE, OPERATION_INCOME, STATUSES
+from states.constants import BANKS, CATEGORIES, OPERATION_EXPENSE, OPERATION_INCOME, STATUSES
 
 
 def button(text, callback_data):
@@ -37,6 +37,21 @@ def payment_keyboard():
             [button("❌ Отмена", "flow:cancel")],
         ]
     )
+
+
+def bank_keyboard():
+    emoji = {
+        "Сбербанк": "🟢",
+        "ВТБ": "🔵",
+        "Газпромбанк": "🧭",
+        "Альфа-Банк": "🔴",
+        "Промсвязьбанк": "🟠",
+        "Совкомбанк": "🟣",
+        "Т-Банк": "🟡",
+    }
+    rows = [[button(f"{emoji.get(bank, '🏦')} {bank}", f"bank:{bank}")] for bank in BANKS]
+    rows.append([button("❌ Отмена", "flow:cancel")])
+    return inline_keyboard(rows)
 
 
 def category_keyboard():

@@ -20,6 +20,8 @@ EXPENSE_HEADERS = [
     "Описание",
     "Сумма",
     "Тип оплаты",
+    "Банк",
+    "Карта или телефон",
     "Статус",
     "Chat ID",
     "Timezone",
@@ -47,15 +49,31 @@ STATE_HEADERS = ["Chat ID", "State", "Data JSON", "Updated At"]
 SHIFTED_OPERATION_TYPES = {"Доход", "Расход", "Перевод"}
 SHIFTED_PAYMENT_TYPES = {"Карта", "Наличные", "Безналичные"}
 SHIFTED_STATUSES = {"Оплачен", "На рассмотрении", "Отказ"}
+BANK_MARKERS = {
+    "сбер": "Сбербанк",
+    "втб": "ВТБ",
+    "газпром": "Газпромбанк",
+    "альфа": "Альфа-Банк",
+    "промсвязь": "Промсвязьбанк",
+    "псб": "Промсвязьбанк",
+    "совком": "Совкомбанк",
+    "т-банк": "Т-Банк",
+    "тинькофф": "Т-Банк",
+}
 
 CANONICAL_ALIASES = {
     "Тип оплаты": ("Тип оплаты", "Источник"),
+    "Карта или телефон": ("Карта или телефон", "Карта/телефон", "Номер карты", "Телефон", "Номер карты или телефон"),
     "Chat ID": ("Chat ID", "User ID"),
 }
 
 APPEND_ALIASES = {
     "Источник": "Тип оплаты",
     "User ID": "Chat ID",
+    "Карта/телефон": "Карта или телефон",
+    "Номер карты": "Карта или телефон",
+    "Телефон": "Карта или телефон",
+    "Номер карты или телефон": "Карта или телефон",
     "Валюта": "currency",
     "Криптовалюта": "",
     "Кошелек": "",
@@ -126,12 +144,21 @@ def _sheet_headers(rows):
     return headers or EXPENSE_HEADERS
 
 
-def _headers_for_append(worksheet):
+def _ensure_optional_operations_headers(worksheet):
     headers = [str(cell).strip() for cell in worksheet.row_values(1)]
     if not headers:
         worksheet.update("A1", [EXPENSE_HEADERS])
         return EXPENSE_HEADERS
+
+    missing_headers = [header for header in ("Банк", "Карта или телефон") if header not in headers]
+    if missing_headers:
+        headers.extend(missing_headers)
+        worksheet.update("A1", [headers])
     return headers
+
+
+def _headers_for_append(worksheet):
+    return _ensure_optional_operations_headers(worksheet)
 
 
 def get_expenses_sheet():
@@ -225,11 +252,21 @@ def _looks_like_shifted_money_row(record):
     return operation in SHIFTED_OPERATION_TYPES and payment in SHIFTED_PAYMENT_TYPES and _is_decimal(amount)
 
 
+def _bank_from_text(value):
+    text = str(value or "").casefold()
+    for marker, bank in BANK_MARKERS.items():
+        if marker in text:
+            return bank
+    return ""
+
+
 def _restore_shifted_money_row(record):
     raw_status = str(record.get("Статус", "")).strip()
     restored = dict(record)
     restored["Тип операции"] = str(record.get("Категория", "")).strip()
     restored["Тип оплаты"] = str(record.get("Описание", "")).strip()
+    restored["Карта или телефон"] = str(record.get("Сумма", "")).strip()
+    restored["Банк"] = _bank_from_text(raw_status)
     restored["Сумма"] = str(record.get("Chat ID", "")).strip()
     restored["Описание"] = raw_status
     restored["Категория"] = ""
@@ -283,6 +320,10 @@ def _repair_value_for_header(record, header):
         return record.get("Сумма", "")
     if header in ("Тип оплаты", "Источник"):
         return record.get("Тип оплаты", "")
+    if header == "Банк":
+        return record.get("Банк", "")
+    if header in ("Карта или телефон", "Карта/телефон", "Номер карты", "Телефон", "Номер карты или телефон"):
+        return record.get("Карта или телефон", "")
     if header == "Статус":
         return record.get("Статус", "")
     if header in ("Chat ID", "User ID"):
@@ -294,6 +335,7 @@ def _repair_value_for_header(record, header):
 
 def repair_shifted_operation_rows():
     worksheet = get_expenses_sheet()
+    _ensure_optional_operations_headers(worksheet)
     rows = worksheet.get_all_values()
     if not rows:
         return {"checked": 0, "fixed": 0}

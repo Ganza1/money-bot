@@ -6,6 +6,7 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler
 
 from keyboards.inline import (
+    bank_keyboard,
     category_keyboard,
     confirm_keyboard,
     delete_confirm_keyboard,
@@ -26,6 +27,8 @@ from states.constants import (
     PAYMENT_CARD,
     PAYMENT_CASH,
     STATE_AMOUNT,
+    STATE_BANK,
+    STATE_CARD_PHONE,
     STATE_CATEGORY,
     STATE_CONFIRM,
     STATE_DELETE_CONFIRM,
@@ -160,6 +163,8 @@ def build_expense(data, chat_id):
         "Описание": data.get("description", ""),
         "Сумма": data.get("amount", ""),
         "Тип оплаты": data.get("payment_type", ""),
+        "Банк": data.get("bank", ""),
+        "Карта или телефон": data.get("card_phone", ""),
         "Статус": data.get("status", ""),
         "Chat ID": str(chat_id),
         "Timezone": tz_name,
@@ -178,6 +183,10 @@ def expense_notification_text(expense, row_number=None):
             f"💳 Тип оплаты: {expense.get('Тип оплаты')}",
         ]
     )
+    if expense.get("Банк"):
+        lines.append(f"🏦 Банк: {expense.get('Банк')}")
+    if expense.get("Карта или телефон"):
+        lines.append(f"📱 Карта/телефон: {expense.get('Карта или телефон')}")
     lines.extend(
         [
             f"🏷️ Категория: {expense.get('Категория')}",
@@ -327,7 +336,14 @@ def handle_message(message, telegram):
     state = current["state"]
     data = current["data"]
 
-    if state == STATE_AMOUNT:
+    if state == STATE_CARD_PHONE:
+        if not text:
+            telegram.send_message(chat_id, "📱 Введите полный номер карты или номер телефона.")
+            return
+        data["card_phone"] = text[:100]
+        sheets.set_state(chat_id, STATE_AMOUNT, data)
+        telegram.send_message(chat_id, "💰 Введите сумму.\nПример: 2500")
+    elif state == STATE_AMOUNT:
         amount = parse_amount(text)
         if amount is None:
             telegram.send_message(chat_id, "💰 Введите положительную сумму числом. Например: 2500")
@@ -418,8 +434,19 @@ def handle_callback(callback, telegram):
             sheets.clear_state(chat_id)
             return
         data["currency"] = CURRENCY_RUB
-        sheets.set_state(chat_id, STATE_AMOUNT, data)
-        telegram.edit_message_text(chat_id, message_id, "💰 Введите сумму.\nПример: 2500")
+        if data["payment_type"] == PAYMENT_CARD:
+            sheets.set_state(chat_id, STATE_BANK, data)
+            telegram.edit_message_text(chat_id, message_id, "🏦 Выберите банк:", reply_markup=bank_keyboard())
+        else:
+            sheets.set_state(chat_id, STATE_AMOUNT, data)
+            telegram.edit_message_text(chat_id, message_id, "💰 Введите сумму.\nПример: 2500")
+        return
+
+    if data_value.startswith("bank:") and state == STATE_BANK:
+        bank = data_value.split(":", 1)[1]
+        data["bank"] = bank
+        sheets.set_state(chat_id, STATE_CARD_PHONE, data)
+        telegram.edit_message_text(chat_id, message_id, "📱 Введите полный номер карты или номер телефона:")
         return
 
     if data_value.startswith("category:") and state == STATE_CATEGORY:
