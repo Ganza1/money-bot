@@ -8,8 +8,6 @@ from http.server import BaseHTTPRequestHandler
 from keyboards.inline import (
     category_keyboard,
     confirm_keyboard,
-    currency_keyboard,
-    crypto_keyboard,
     delete_confirm_keyboard,
     main_menu_keyboard,
     operation_type_keyboard,
@@ -23,18 +21,13 @@ from services import reports, sheets
 from services.telegram import TelegramClient, TelegramError
 from states.constants import (
     CURRENCY_RUB,
-    FIAT_CURRENCIES,
     OPERATION_EXPENSE,
     OPERATION_INCOME,
     PAYMENT_CARD,
     PAYMENT_CASH,
-    PAYMENT_CRYPTO,
-    STATE_CURRENCY,
     STATE_AMOUNT,
     STATE_CATEGORY,
     STATE_CONFIRM,
-    STATE_CRYPTO_CURRENCY,
-    STATE_CRYPTO_WALLET,
     STATE_DELETE_CONFIRM,
     STATE_DESCRIPTION,
     STATE_PAYMENT_TYPE,
@@ -166,12 +159,9 @@ def build_expense(data, chat_id):
         "Описание": data.get("description", ""),
         "Сумма": data.get("amount", ""),
         "Тип оплаты": data.get("payment_type", ""),
-        "Криптовалюта": data.get("crypto_currency", ""),
         "Статус": data.get("status", ""),
         "Chat ID": str(chat_id),
         "Timezone": tz_name,
-        "Кошелек": data.get("crypto_wallet", ""),
-        "Валюта": data.get("currency", CURRENCY_RUB) if data.get("payment_type") != PAYMENT_CRYPTO else "",
         "Тип операции": data.get("operation_type", OPERATION_EXPENSE),
     }
 
@@ -187,12 +177,6 @@ def expense_notification_text(expense, row_number=None):
             f"💳 Тип оплаты: {expense.get('Тип оплаты')}",
         ]
     )
-    if expense.get("Криптовалюта"):
-        lines.append(f"💱 Криптовалюта: {expense.get('Криптовалюта')}")
-    if expense.get("Кошелек"):
-        lines.append(f"👛 Кошелек: {expense.get('Кошелек')}")
-    if expense.get("Валюта"):
-        lines.append(f"💱 Валюта: {expense.get('Валюта')}")
     lines.extend(
         [
             f"🏷️ Категория: {expense.get('Категория')}",
@@ -300,6 +284,7 @@ def handle_command(chat_id, command, telegram):
                 f"📄 Sheet ID: {info['sheet_id']}\n"
                 f"📋 Лист операций: {info['operations_sheet']}\n"
                 f"📊 Operations rows: {info['operations_rows']}\n"
+                f"📈 Итоги rows: {info['summary_rows']}\n"
                 f"🧠 States rows: {info['states_rows']}\n"
                 f"🔖 Headers: {headers}\n"
                 f"🆔 Ваш chat_id: {chat_id}\n"
@@ -341,13 +326,6 @@ def handle_message(message, telegram):
         data["description"] = text[:500]
         sheets.set_state(chat_id, STATE_CATEGORY, data)
         telegram.send_message(chat_id, "🏷️ Выберите категорию:", reply_markup=category_keyboard())
-    elif state == STATE_CRYPTO_WALLET:
-        if not text:
-            telegram.send_message(chat_id, "👛 Номер кошелька не должен быть пустым.")
-            return
-        data["crypto_wallet"] = text[:200]
-        sheets.set_state(chat_id, STATE_AMOUNT, data)
-        telegram.send_message(chat_id, "💰 Введите сумму.\nПример: 25")
     else:
         telegram.send_message(chat_id, "👇 Выберите действие в меню или отправьте /add.", reply_markup=main_menu_keyboard())
 
@@ -417,35 +395,13 @@ def handle_callback(callback, telegram):
 
     if data_value.startswith("payment:") and state == STATE_PAYMENT_TYPE:
         selected = data_value.split(":", 1)[1]
-        payment_map = {"cash": PAYMENT_CASH, "card": PAYMENT_CARD, "crypto": PAYMENT_CRYPTO}
+        payment_map = {"cash": PAYMENT_CASH, "card": PAYMENT_CARD}
         data["payment_type"] = payment_map.get(selected)
         if not data["payment_type"]:
             telegram.send_message(chat_id, "Не удалось распознать способ оплаты. Попробуйте /add заново.")
             sheets.clear_state(chat_id)
             return
-        if data["payment_type"] == PAYMENT_CRYPTO:
-            sheets.set_state(chat_id, STATE_CRYPTO_CURRENCY, data)
-            telegram.edit_message_text(chat_id, message_id, "💱 Уточните валюту:", reply_markup=crypto_keyboard())
-        else:
-            data["currency"] = CURRENCY_RUB
-            sheets.set_state(chat_id, STATE_AMOUNT, data)
-            telegram.edit_message_text(chat_id, message_id, "💰 Введите сумму.\nПример: 2500")
-        return
-
-    if data_value.startswith("crypto:") and state == STATE_CRYPTO_CURRENCY:
-        currency = data_value.split(":", 1)[1]
-        data["crypto_currency"] = currency
-        sheets.set_state(chat_id, STATE_CRYPTO_WALLET, data)
-        telegram.edit_message_text(chat_id, message_id, "👛 Введите номер кошелька.")
-        return
-
-    if data_value.startswith("currency:") and state == STATE_CURRENCY:
-        currency = data_value.split(":", 1)[1].upper()
-        if currency not in FIAT_CURRENCIES:
-            telegram.send_message(chat_id, "Не удалось распознать валюту. Попробуйте /add заново.")
-            sheets.clear_state(chat_id)
-            return
-        data["currency"] = currency
+        data["currency"] = CURRENCY_RUB
         sheets.set_state(chat_id, STATE_AMOUNT, data)
         telegram.edit_message_text(chat_id, message_id, "💰 Введите сумму.\nПример: 2500")
         return

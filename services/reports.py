@@ -1,10 +1,16 @@
 from collections import OrderedDict
-from datetime import date, datetime, time, timedelta
+from datetime import datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 from zoneinfo import ZoneInfo
 
-from states.constants import CURRENCY_RUB, FIAT_CURRENCIES, OPERATION_EXPENSE, OPERATION_INCOME, PAYMENT_GROUPS, STATUSES
+from states.constants import OPERATION_EXPENSE, OPERATION_INCOME, OPERATION_TRANSFER, PAYMENT_CARD, PAYMENT_CASH, PAYMENT_GROUPS, STATUSES
 
+
+PAID_STATUS = "Оплачен"
+CARD_ALIASES = {PAYMENT_CARD, "Безналичные", "Карта"}
+CASH_ALIASES = {PAYMENT_CASH, "Наличные"}
+CASH_TO_CARD_ALIASES = {"Наличные → Карта", "Наличные -> Карта", "cash_to_card"}
+CARD_TO_CASH_ALIASES = {"Карта → Наличные", "Карта -> Наличные", "card_to_cash"}
 
 STATUS_EMOJI = {
     "Оплачен": "✅",
@@ -14,11 +20,9 @@ STATUS_EMOJI = {
 }
 
 GROUP_EMOJI = {
-    "Наличные": "💵",
+    "Карта": "🏦",
     "Безналичные": "🏦",
-    "BTC": "₿",
-    "ETH": "⟠",
-    "USDT": "💵",
+    "Наличные": "💵",
 }
 
 
@@ -70,37 +74,66 @@ def parse_expense_datetime(row, tz_name):
         return None
 
 
-def fiat_currency(row):
-    currency = str(row.get("Валюта", "")).strip().upper()
-    return currency if currency in FIAT_CURRENCIES else CURRENCY_RUB
-
-
 def payment_group(row):
     payment_type = str(row.get("Тип оплаты", "")).strip()
-    crypto = str(row.get("Криптовалюта", "")).strip().upper()
-    if payment_type == "Крипта" and crypto:
-        return crypto
-    if payment_type:
-        return f"{payment_type} {fiat_currency(row)}"
-    return payment_type
+    if payment_type in CARD_ALIASES:
+        return PAYMENT_CARD
+    if payment_type in CASH_ALIASES:
+        return PAYMENT_CASH
+    return payment_type or PAYMENT_CARD
 
 
 def amount_with_currency(row):
-    amount = row.get("Сумма")
-    if str(row.get("Тип оплаты", "")).strip() == "Крипта":
-        currency = str(row.get("Криптовалюта", "")).strip().upper()
-    else:
-        currency = fiat_currency(row)
-    return f"{amount} {currency}".strip()
+    return f"{row.get('Сумма')} ₽".strip()
 
 
 def operation_type(row):
     value = str(row.get("Тип операции", "")).strip()
-    return value if value in (OPERATION_INCOME, OPERATION_EXPENSE) else OPERATION_EXPENSE
+    if value in (OPERATION_INCOME, OPERATION_EXPENSE, OPERATION_TRANSFER):
+        return value
+    return OPERATION_EXPENSE
+
+
+def is_paid(row):
+    return str(row.get("Статус", "")).strip() == PAID_STATUS
 
 
 def operation_sign(row):
-    return Decimal("1") if operation_type(row) == OPERATION_INCOME else Decimal("-1")
+    if operation_type(row) == OPERATION_INCOME:
+        return Decimal("1")
+    if operation_type(row) == OPERATION_EXPENSE:
+        return Decimal("-1")
+    return Decimal("0")
+
+
+def transfer_direction(row):
+    return str(row.get("Направление перевода", "")).strip()
+
+
+def apply_to_balances(card_balance, cash_balance, row):
+    amount = parse_amount(row.get("Сумма"))
+    op_type = operation_type(row)
+    group = payment_group(row)
+    direction = transfer_direction(row)
+
+    if op_type == OPERATION_INCOME:
+        if group == PAYMENT_CASH:
+            cash_balance += amount
+        else:
+            card_balance += amount
+    elif op_type == OPERATION_EXPENSE:
+        if group == PAYMENT_CASH:
+            cash_balance -= amount
+        else:
+            card_balance -= amount
+    elif op_type == OPERATION_TRANSFER:
+        if direction in CASH_TO_CARD_ALIASES:
+            cash_balance -= amount
+            card_balance += amount
+        elif direction in CARD_TO_CASH_ALIASES:
+            card_balance -= amount
+            cash_balance += amount
+    return card_balance, cash_balance
 
 
 def filter_rows(rows, start_dt, end_dt, tz_name, chat_id=None):
@@ -118,20 +151,44 @@ def summarize(rows):
     groups = OrderedDict((group, Decimal("0")) for group in PAYMENT_GROUPS)
     income_total = Decimal("0")
     expense_total = Decimal("0")
-    net_total = Decimal("0")
+    transfer_total = Decimal("0")
+    transfer_count = 0
+    card_balance = Decimal("0")
+    cash_balance = Decimal("0")
+
     for row in rows:
         amount = parse_amount(row.get("Сумма"))
-        signed_amount = amount * operation_sign(row)
+        op_type = operation_type(row)
         group = payment_group(row)
         if group not in groups:
             groups[group] = Decimal("0")
-        groups[group] += signed_amount
-        if operation_type(row) == OPERATION_INCOME:
+
+        if not is_paid(row):
+            continue
+
+        if op_type == OPERATION_INCOME:
             income_total += amount
-        else:
+            groups[group] += amount
+        elif op_type == OPERATION_EXPENSE:
             expense_total += amount
-        net_total += signed_amount
-    return groups, income_total, expense_total, net_total
+            groups[group] -= amount
+        elif op_type == OPERATION_TRANSFER:
+            transfer_total += amount
+            transfer_count += 1
+
+        card_balance, cash_balance = apply_to_balances(card_balance, cash_balance, row)
+
+    return {
+        "groups": groups,
+        "income_total": income_total,
+        "expense_total": expense_total,
+        "net_total": income_total - expense_total,
+        "transfer_total": transfer_total,
+        "transfer_count": transfer_count,
+        "card_balance": card_balance,
+        "cash_balance": cash_balance,
+        "total_balance": card_balance + cash_balance,
+    }
 
 
 def summarize_statuses(rows):
@@ -151,6 +208,8 @@ def summarize_statuses(rows):
 def format_expense_line(row):
     group = payment_group(row)
     op_emoji = "📈" if operation_type(row) == OPERATION_INCOME else "📉"
+    if operation_type(row) == OPERATION_TRANSFER:
+        op_emoji = "🔁"
     return (
         f"🕒 {row.get('Дата и время')} | {op_emoji} {operation_type(row)} | {group_label(group)} | 🏷️ {row.get('Категория')} | "
         f"💰 {amount_with_currency(row)} | 📝 {row.get('Описание')}"
@@ -167,7 +226,7 @@ def pending_and_rejected_text(rows):
     if not important:
         return []
 
-    lines = ["", "⚠️ Платежи на рассмотрении и отказ:"]
+    lines = ["", "⚠️ Не учитываются в финансовых итогах:"]
     for status in ("На рассмотрении", "Отказ"):
         status_rows = [row for row in important if str(row.get("Статус", "")).strip() == status]
         if not status_rows:
@@ -176,25 +235,25 @@ def pending_and_rejected_text(rows):
         for row in status_rows[:10]:
             lines.append(format_expense_history_line(row))
         if len(status_rows) > 10:
-            lines.append(f"…и еще {len(status_rows) - 10}")
+            lines.append(f"...и еще {len(status_rows) - 10}")
     return lines
 
 
 def report_text(title, rows):
-    groups, income_total, expense_total, net_total = summarize(rows)
+    summary = summarize(rows)
     status_groups, status_counts = summarize_statuses(rows)
-    lines = [f"📊 {title}", ""]
-    for group, amount in groups.items():
-        lines.append(f"{group_label(group)}: {format_amount(amount)}")
-    rub_total = sum(amount for group, amount in groups.items() if group.endswith("RUB"))
-    crypto_total = net_total - rub_total
+    lines = [f"📊 {title}", "", "💵 Финансовые итоги считаются только по статусу Оплачен.", ""]
     lines.extend(
         [
+            f"📈 Доходы всего: {format_amount(summary['income_total'])} ₽",
+            f"📉 Расходы всего: {format_amount(summary['expense_total'])} ₽",
+            f"🧮 Общий итог: {format_amount(summary['net_total'])} ₽",
             "",
-            f"📈 Доходы всего: {format_amount(income_total)}",
-            f"📉 Расходы всего: {format_amount(expense_total)}",
-            f"🧮 Общий итог RUB: {format_amount(rub_total)}",
-            f"🧮 Общий итог крипта: {format_amount(crypto_total)}",
+            f"🏦 Баланс карты: {format_amount(summary['card_balance'])} ₽",
+            f"💵 Баланс наличных: {format_amount(summary['cash_balance'])} ₽",
+            f"💰 Общий баланс: {format_amount(summary['total_balance'])} ₽",
+            "",
+            f"🔁 Переводы: {format_amount(summary['transfer_total'])} ₽ ({summary['transfer_count']})",
             f"📌 Операций: {len(rows)}",
             "",
             "🔄 По статусам:",
@@ -203,9 +262,35 @@ def report_text(title, rows):
     for status, amount in status_groups.items():
         count = status_counts.get(status, 0)
         if count:
-            lines.append(f"{status_label(status)}: {format_amount(amount)} ({count})")
+            lines.append(f"{status_label(status)}: {format_amount(amount)} ₽ ({count})")
     lines.extend(pending_and_rejected_text(rows))
     return "\n".join(lines)
+
+
+def summary_sheet_values(rows):
+    summary = summarize(rows)
+    status_groups, status_counts = summarize_statuses(rows)
+    updated_at = now_in_timezone("Europe/Moscow").strftime("%Y-%m-%d %H:%M:%S")
+    values = [
+        ["Итоги", "Значение", "Комментарий"],
+        ["Обновлено", updated_at, "Europe/Moscow"],
+        ["Доходы всего", format_amount(summary["income_total"]), "Только Оплачен"],
+        ["Расходы всего", format_amount(summary["expense_total"]), "Только Оплачен"],
+        ["Общий итог", format_amount(summary["net_total"]), "Доходы - Расходы"],
+        ["Баланс карты", format_amount(summary["card_balance"]), "Только Оплачен"],
+        ["Баланс наличных", format_amount(summary["cash_balance"]), "Только Оплачен"],
+        ["Общий баланс", format_amount(summary["total_balance"]), "Карта + Наличные"],
+        ["Переводы", format_amount(summary["transfer_total"]), f"Операций: {summary['transfer_count']}"],
+        ["Операций всего", len(rows), "Все статусы"],
+        [],
+        ["Статус", "Сумма", "Количество"],
+    ]
+    for status, amount in status_groups.items():
+        values.append([status, format_amount(amount), status_counts.get(status, 0)])
+    values.extend([[], ["Источник", "Баланс", "Комментарий"]])
+    for group, amount in summary["groups"].items():
+        values.append([group, format_amount(amount), "Только Оплачен"] )
+    return values
 
 
 def today_range(tz_name):
@@ -253,7 +338,7 @@ def history_text(rows, chat_id, limit=20, include_all=False):
         line = format_expense_history_line(row)
         candidate = "\n".join([*lines, line])
         if len(candidate) > 3500:
-            lines.append("…история обрезана, последние записи слишком длинные.")
+            lines.append("...история обрезана, последние записи слишком длинные.")
             break
         lines.append(line)
     lines.extend(pending_and_rejected_text(recent))
@@ -261,21 +346,12 @@ def history_text(rows, chat_id, limit=20, include_all=False):
 
 
 def format_expense_confirmation(data, tz_name, created_at):
-    lines = []
-    if data.get("payment_type") == "Крипта":
-        lines.append("💳 Тип оплаты: Крипта")
-        lines.append(f"💱 Валюта: {data.get('crypto_currency')}")
-        lines.append(f"👛 Кошелек: {data.get('crypto_wallet')}")
-    else:
-        lines.append(f"💳 Способ оплаты: {data.get('payment_type')}")
-        lines.append(f"💱 Валюта: {data.get('currency', CURRENCY_RUB)}")
-    lines.extend(
-        [
-            f"🏷️ Категория: {data.get('category')}",
-            f"🔄 Статус: {data.get('status')}",
-            f"💰 Сумма: {data.get('amount')}",
-            f"📝 Описание: {data.get('description')}",
-            f"🕒 Дата и время: {created_at.strftime('%Y-%m-%d %H:%M:%S')} {tz_name}",
-        ]
-    )
+    lines = [
+        f"💳 Способ оплаты: {data.get('payment_type')}",
+        f"🏷️ Категория: {data.get('category')}",
+        f"🔄 Статус: {data.get('status')}",
+        f"💰 Сумма: {data.get('amount')} ₽",
+        f"📝 Описание: {data.get('description')}",
+        f"🕒 Дата и время: {created_at.strftime('%Y-%m-%d %H:%M:%S')} {tz_name}",
+    ]
     return "\n".join(lines)
