@@ -94,7 +94,12 @@ def append_expense(expense):
 
 
 def all_expenses():
-    return get_expenses_sheet().get_all_records(expected_headers=EXPENSE_HEADERS)
+    rows = get_expenses_sheet().get_all_values()
+    records = []
+    for row in rows[1:]:
+        if any(str(cell).strip() for cell in row):
+            records.append(_record_from_row(row))
+    return records
 
 
 def _record_from_row(row):

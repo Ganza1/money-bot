@@ -213,6 +213,25 @@ def notify_admin_about_expense(telegram, expense, row_number=None):
             print(f"Admin notification failed for {admin_id}: {exc}", flush=True)
 
 
+def save_current_expense(chat_id, message_id, data, telegram):
+    expense = build_expense(data, chat_id)
+    result = sheets.append_expense(expense)
+    row_number = row_number_from_append_result(result)
+    if not row_number:
+        row_number, _ = sheets.find_last_expense_row(chat_id)
+    print(
+        f"Expense saved: chat_id={chat_id}, amount={expense.get('Сумма')}, "
+        f"category={expense.get('Категория')}, updated_range={result.get('updates', {}).get('updatedRange')}",
+        flush=True,
+    )
+    if row_number:
+        sheets.set_state(chat_id, STATE_UNDO_SAVED, {"row_number": row_number, "expense": expense})
+    else:
+        sheets.clear_state(chat_id)
+    notify_admin_about_expense(telegram, expense, row_number=row_number)
+    telegram.edit_message_text(chat_id, message_id, "✅ Запись сохранена в лист Operations.", reply_markup=saved_keyboard())
+
+
 def handle_command(chat_id, command, telegram):
     tz_name = env_timezone()
     if command == "/start":
@@ -418,13 +437,7 @@ def handle_callback(callback, telegram):
         tz_name = env_timezone()
         created_at = reports.now_in_timezone(tz_name)
         data["created_at"] = created_at.strftime("%Y-%m-%d %H:%M:%S")
-        sheets.set_state(chat_id, STATE_CONFIRM, data)
-        telegram.edit_message_text(
-            chat_id,
-            message_id,
-            reports.format_expense_confirmation(data, tz_name, created_at),
-            reply_markup=confirm_keyboard(),
-        )
+        save_current_expense(chat_id, message_id, data, telegram)
         return
 
     if data_value.startswith("status_row:"):
@@ -458,22 +471,7 @@ def handle_callback(callback, telegram):
         return
 
     if data_value == "confirm:save" and state == STATE_CONFIRM:
-        expense = build_expense(data, chat_id)
-        result = sheets.append_expense(expense)
-        row_number = row_number_from_append_result(result)
-        if not row_number:
-            row_number, _ = sheets.find_last_expense_row(chat_id)
-        print(
-            f"Expense saved: chat_id={chat_id}, amount={expense.get('Сумма')}, "
-            f"category={expense.get('Категория')}, updated_range={result.get('updates', {}).get('updatedRange')}",
-            flush=True,
-        )
-        if row_number:
-            sheets.set_state(chat_id, STATE_UNDO_SAVED, {"row_number": row_number, "expense": expense})
-        else:
-            sheets.clear_state(chat_id)
-        notify_admin_about_expense(telegram, expense, row_number=row_number)
-        telegram.edit_message_text(chat_id, message_id, "✅ Запись сохранена в лист Operations.", reply_markup=saved_keyboard())
+        save_current_expense(chat_id, message_id, data, telegram)
         return
 
     if data_value == "undo:saved" and state == STATE_UNDO_SAVED:

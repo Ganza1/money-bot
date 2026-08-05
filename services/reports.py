@@ -250,9 +250,14 @@ def history_text(rows, chat_id, limit=20, include_all=False):
     title = "📜 Последние операции по всей таблице:" if include_all else "📜 Последние операции:"
     lines = [title]
     for row in reversed(recent):
-        lines.append(format_expense_history_line(row))
+        line = format_expense_history_line(row)
+        candidate = "\n".join([*lines, line])
+        if len(candidate) > 3500:
+            lines.append("…история обрезана, последние записи слишком длинные.")
+            break
+        lines.append(line)
     lines.extend(pending_and_rejected_text(recent))
-    return "\n".join(lines)
+    return "\n".join(lines)[:3900]
 
 
 def format_expense_confirmation(data, tz_name, created_at):
