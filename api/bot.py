@@ -146,6 +146,7 @@ def send_help(chat_id, telegram):
                 "🗑️ /delete_last - удалить последнюю запись",
                 "🕒 /time - текущее время Europe/Moscow",
                 "🆔 /id - показать chat_id",
+                "🛠️ /debug - диагностика для администратора",
             ]
         ),
     )
@@ -281,6 +282,31 @@ def handle_command(chat_id, command, telegram):
         telegram.send_message(chat_id, f"{now.strftime('%Y-%m-%d %H:%M:%S')} {tz_name}")
     elif command == "/id":
         telegram.send_message(chat_id, f"🆔 Ваш chat_id: {chat_id}")
+    elif command == "/debug":
+        if not is_admin_chat(chat_id):
+            telegram.send_message(
+                chat_id,
+                "🔒 Диагностика доступна только администратору.\n"
+                f"🆔 Ваш chat_id: {chat_id}",
+            )
+            return
+        try:
+            info = sheets.debug_info()
+            headers = ", ".join(str(item) for item in info["headers"]) or "нет"
+            telegram.send_message(
+                chat_id,
+                "🛠️ Диагностика\n"
+                f"✅ Google Sheets подключен\n"
+                f"📄 Sheet ID: {info['sheet_id']}\n"
+                f"📋 Лист операций: {info['operations_sheet']}\n"
+                f"📊 Operations rows: {info['operations_rows']}\n"
+                f"🧠 States rows: {info['states_rows']}\n"
+                f"🔖 Headers: {headers}\n"
+                f"🆔 Ваш chat_id: {chat_id}\n"
+                f"👑 Admin IDs: {', '.join(admin_chat_ids()) or 'не заданы'}",
+            )
+        except Exception as exc:
+            telegram.send_message(chat_id, f"⚠️ Ошибка диагностики: {type(exc).__name__}: {str(exc)[:600]}")
     else:
         telegram.send_message(chat_id, "❓ Неизвестная команда. Нажмите /help.")
 

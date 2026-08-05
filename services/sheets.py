@@ -88,6 +88,22 @@ def ensure_sheets():
     _worksheet(spreadsheet, STATES_SHEET, STATE_HEADERS)
 
 
+def debug_info():
+    spreadsheet = _spreadsheet()
+    operations = _worksheet(spreadsheet, EXPENSES_SHEET, EXPENSE_HEADERS)
+    states = _worksheet(spreadsheet, STATES_SHEET, STATE_HEADERS)
+    operation_rows = operations.get_all_values()
+    state_rows = states.get_all_values()
+    headers = operation_rows[0] if operation_rows else []
+    return {
+        "sheet_id": os.environ.get("GOOGLE_SHEET_ID", ""),
+        "operations_sheet": EXPENSES_SHEET,
+        "operations_rows": max(len(operation_rows) - 1, 0),
+        "states_rows": max(len(state_rows) - 1, 0),
+        "headers": headers,
+    }
+
+
 def append_expense(expense):
     row = [expense.get(header, "") for header in EXPENSE_HEADERS]
     return get_expenses_sheet().append_row(row, value_input_option="USER_ENTERED")
