@@ -267,6 +267,25 @@ def report_text(title, rows):
     return "\n".join(lines)
 
 
+def balance_text(rows, tz_name):
+    summary = summarize(rows)
+    updated_at = now_in_timezone(tz_name).strftime("%Y-%m-%d %H:%M:%S")
+    return "\n".join(
+        [
+            "📌 Остатки на сегодня",
+            f"🕒 {updated_at} {tz_name}",
+            "",
+            f"🏦 Карта: {format_amount(summary['card_balance'])} ₽",
+            f"💵 Наличные: {format_amount(summary['cash_balance'])} ₽",
+            f"💰 Общий остаток: {format_amount(summary['total_balance'])} ₽",
+            "",
+            f"📈 Доходы всего: {format_amount(summary['income_total'])} ₽",
+            f"📉 Расходы всего: {format_amount(summary['expense_total'])} ₽",
+            f"🔁 Переводы: {format_amount(summary['transfer_total'])} ₽ ({summary['transfer_count']})",
+        ]
+    )
+
+
 def summary_sheet_values(rows):
     summary = summarize(rows)
     updated_at = now_in_timezone("Europe/Moscow").strftime("%Y-%m-%d %H:%M:%S")

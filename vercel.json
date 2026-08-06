@@ -7,6 +7,10 @@
   },
   "crons": [
     {
+      "path": "/api/daily_balance",
+      "schedule": "0 14 * * *"
+    },
+    {
       "path": "/api/weekly_report",
       "schedule": "0 14 * * 5"
     },
