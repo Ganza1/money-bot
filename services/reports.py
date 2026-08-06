@@ -7,6 +7,7 @@ from states.constants import OPERATION_EXPENSE, OPERATION_INCOME, OPERATION_TRAN
 
 
 PAID_STATUS = "Оплачен"
+PAID_STATUS_ALIASES = {"оплачен", "оплачено", "paid", "остаток"}
 CARD_ALIASES = {PAYMENT_CARD, "Безналичные", "Карта"}
 CASH_ALIASES = {PAYMENT_CASH, "Наличные"}
 CASH_TO_CARD_ALIASES = {"Наличные → Карта", "Наличные -> Карта", "cash_to_card"}
@@ -35,6 +36,17 @@ def group_label(group):
     return f"{GROUP_EMOJI.get(base, '💳')} {group}"
 
 
+def clean_text(value):
+    return str(value or "").strip()
+
+
+def clean_lookup(value):
+    text = clean_text(value).casefold().replace("ё", "е")
+    for marker in ("✅", "☑️", "⏳", "❌", "▫️"):
+        text = text.replace(marker, "")
+    return " ".join(text.split())
+
+
 def timezone(name):
     return ZoneInfo(name or "Europe/Moscow")
 
@@ -46,7 +58,7 @@ def now_in_timezone(tz_name):
 def parse_amount(value):
     if value is None:
         return Decimal("0")
-    normalized = str(value).replace(" ", "").replace(",", ".")
+    normalized = str(value).replace(" ", "").replace("\u00a0", "").replace(",", ".")
     try:
         return Decimal(normalized)
     except InvalidOperation:
@@ -75,10 +87,11 @@ def parse_expense_datetime(row, tz_name):
 
 
 def payment_group(row):
-    payment_type = str(row.get("Тип оплаты", "")).strip()
-    if payment_type in CARD_ALIASES:
+    payment_type = clean_text(row.get("Тип оплаты")) or clean_text(row.get("Источник"))
+    payment_lookup = clean_lookup(payment_type)
+    if payment_type in CARD_ALIASES or "карт" in payment_lookup or "безнал" in payment_lookup:
         return PAYMENT_CARD
-    if payment_type in CASH_ALIASES:
+    if payment_type in CASH_ALIASES or "налич" in payment_lookup:
         return PAYMENT_CASH
     return payment_type or PAYMENT_CARD
 
@@ -88,14 +101,22 @@ def amount_with_currency(row):
 
 
 def operation_type(row):
-    value = str(row.get("Тип операции", "")).strip()
-    if value in (OPERATION_INCOME, OPERATION_EXPENSE, OPERATION_TRANSFER):
-        return value
+    for key in ("Тип операции", "Категория"):
+        value = clean_text(row.get(key))
+        lookup = clean_lookup(value)
+        if value in (OPERATION_INCOME, OPERATION_EXPENSE, OPERATION_TRANSFER):
+            return value
+        if lookup == "доход":
+            return OPERATION_INCOME
+        if lookup == "расход":
+            return OPERATION_EXPENSE
+        if lookup == "перевод":
+            return OPERATION_TRANSFER
     return OPERATION_EXPENSE
 
 
 def is_paid(row):
-    return str(row.get("Статус", "")).strip() == PAID_STATUS
+    return clean_lookup(row.get("Статус")) in PAID_STATUS_ALIASES
 
 
 def operation_sign(row):
@@ -107,7 +128,7 @@ def operation_sign(row):
 
 
 def transfer_direction(row):
-    return str(row.get("Направление перевода", "")).strip()
+    return clean_text(row.get("Направление перевода")) or clean_text(row.get("Направление")) or clean_text(row.get("Перевод"))
 
 
 def apply_to_balances(card_balance, cash_balance, row):
@@ -155,6 +176,7 @@ def summarize(rows):
     transfer_count = 0
     card_balance = Decimal("0")
     cash_balance = Decimal("0")
+    paid_count = 0
 
     for row in rows:
         amount = parse_amount(row.get("Сумма"))
@@ -166,6 +188,7 @@ def summarize(rows):
         if not is_paid(row):
             continue
 
+        paid_count += 1
         if op_type == OPERATION_INCOME:
             income_total += amount
             groups[group] += amount
@@ -188,6 +211,8 @@ def summarize(rows):
         "card_balance": card_balance,
         "cash_balance": cash_balance,
         "total_balance": card_balance + cash_balance,
+        "rows_count": len(rows),
+        "paid_count": paid_count,
     }
 
 
@@ -282,6 +307,9 @@ def balance_text(rows, tz_name):
             f"📈 Доходы всего: {format_amount(summary['income_total'])} ₽",
             f"📉 Расходы всего: {format_amount(summary['expense_total'])} ₽",
             f"🔁 Переводы: {format_amount(summary['transfer_total'])} ₽ ({summary['transfer_count']})",
+            "",
+            f"📌 Строк прочитано: {summary['rows_count']}",
+            f"✅ Учитывается в остатках: {summary['paid_count']}",
         ]
     )
 
@@ -300,6 +328,7 @@ def summary_sheet_values(rows):
         ["Итог доходы-расходы", format_amount(summary["net_total"]), "Переводы не меняют итог"],
         ["Переводы", format_amount(summary["transfer_total"]), f"Операций: {summary['transfer_count']}"],
         ["Операций всего", len(rows), "Все строки Operations"],
+        ["Учитывается в остатках", summary["paid_count"], "Строки со статусом Оплачен/остаток"],
         ["Обновлено", updated_at, "Europe/Moscow"],
     ]
 
