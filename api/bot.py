@@ -434,7 +434,8 @@ def handle_callback(callback, telegram):
             sheets.clear_state(chat_id)
             return
         data["currency"] = CURRENCY_RUB
-        if data["payment_type"] == PAYMENT_CARD:
+        needs_card_details = data["payment_type"] == PAYMENT_CARD and data.get("operation_type") != OPERATION_INCOME
+        if needs_card_details:
             sheets.set_state(chat_id, STATE_BANK, data)
             telegram.edit_message_text(chat_id, message_id, "🏦 Выберите банк:", reply_markup=bank_keyboard())
         else:
