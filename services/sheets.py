@@ -150,7 +150,7 @@ def _ensure_optional_operations_headers(worksheet):
         worksheet.update("A1", [EXPENSE_HEADERS])
         return EXPENSE_HEADERS
 
-    missing_headers = [header for header in ("Банк", "Карта или телефон") if header not in headers]
+    missing_headers = [header for header in ("Банк", "Карта или телефон", "Тип операции") if header not in headers]
     if missing_headers:
         headers.extend(missing_headers)
         worksheet.update("A1", [headers])
@@ -328,6 +328,8 @@ def _repair_value_for_header(record, header):
         return record.get("Статус", "")
     if header in ("Chat ID", "User ID"):
         return record.get("Chat ID", "")
+    if header == "Timezone":
+        return record.get("Timezone", "")
     if header == "Тип операции":
         return record.get("Тип операции", "")
     return None
