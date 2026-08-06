@@ -1,4 +1,4 @@
-from states.constants import BANKS, CATEGORIES, OPERATION_EXPENSE, OPERATION_INCOME, STATUSES
+from states.constants import BANKS, CATEGORIES, OPERATION_EXPENSE, OPERATION_INCOME, OPERATION_TRANSFER, STATUSES, TRANSFER_CARD_TO_CASH, TRANSFER_CASH_TO_CARD
 
 
 def button(text, callback_data):
@@ -19,11 +19,22 @@ def main_menu_keyboard():
     )
 
 
-def operation_type_keyboard():
+def operation_type_keyboard(include_admin_operations=False):
+    rows = []
+    if include_admin_operations:
+        rows.append([button(f"📈 {OPERATION_INCOME}", "operation:income")])
+    rows.append([button(f"📉 {OPERATION_EXPENSE}", "operation:expense")])
+    if include_admin_operations:
+        rows.append([button(f"🔁 {OPERATION_TRANSFER}", "operation:transfer")])
+    rows.append([button("❌ Отмена", "flow:cancel")])
+    return inline_keyboard(rows)
+
+
+def transfer_direction_keyboard():
     return inline_keyboard(
         [
-            [button(f"📈 {OPERATION_INCOME}", "operation:income")],
-            [button(f"📉 {OPERATION_EXPENSE}", "operation:expense")],
+            [button(f"💵➡️🏦 {TRANSFER_CASH_TO_CARD}", "transfer:cash_to_card")],
+            [button(f"🏦➡️💵 {TRANSFER_CARD_TO_CASH}", "transfer:card_to_cash")],
             [button("❌ Отмена", "flow:cancel")],
         ]
     )

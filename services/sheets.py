@@ -20,6 +20,7 @@ EXPENSE_HEADERS = [
     "Описание",
     "Сумма",
     "Тип оплаты",
+    "Направление перевода",
     "Банк",
     "Карта или телефон",
     "Статус",
@@ -63,12 +64,15 @@ BANK_MARKERS = {
 
 CANONICAL_ALIASES = {
     "Тип оплаты": ("Тип оплаты", "Источник"),
+    "Направление перевода": ("Направление перевода", "Направление", "Перевод"),
     "Карта или телефон": ("Карта или телефон", "Карта/телефон", "Номер карты", "Телефон", "Номер карты или телефон"),
     "Chat ID": ("Chat ID", "User ID"),
 }
 
 APPEND_ALIASES = {
     "Источник": "Тип оплаты",
+    "Направление": "Направление перевода",
+    "Перевод": "Направление перевода",
     "User ID": "Chat ID",
     "Карта/телефон": "Карта или телефон",
     "Номер карты": "Карта или телефон",
@@ -150,7 +154,7 @@ def _ensure_optional_operations_headers(worksheet):
         worksheet.update("A1", [EXPENSE_HEADERS])
         return EXPENSE_HEADERS
 
-    missing_headers = [header for header in ("Банк", "Карта или телефон", "Тип операции") if header not in headers]
+    missing_headers = [header for header in ("Направление перевода", "Банк", "Карта или телефон", "Тип операции") if header not in headers]
     if missing_headers:
         headers.extend(missing_headers)
         worksheet.update("A1", [headers])
@@ -320,6 +324,8 @@ def _repair_value_for_header(record, header):
         return record.get("Сумма", "")
     if header in ("Тип оплаты", "Источник"):
         return record.get("Тип оплаты", "")
+    if header in ("Направление перевода", "Направление", "Перевод"):
+        return record.get("Направление перевода", "")
     if header == "Банк":
         return record.get("Банк", "")
     if header in ("Карта или телефон", "Карта/телефон", "Номер карты", "Телефон", "Номер карты или телефон"):

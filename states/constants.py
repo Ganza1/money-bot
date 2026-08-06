@@ -1,5 +1,6 @@
 STATE_OPERATION_TYPE = "operation_type"
 STATE_PAYMENT_TYPE = "payment_type"
+STATE_TRANSFER_DIRECTION = "transfer_direction"
 STATE_BANK = "bank"
 STATE_CARD_PHONE = "card_phone"
 STATE_AMOUNT = "amount"
@@ -17,6 +18,9 @@ OPERATION_TRANSFER = "Перевод"
 
 PAYMENT_CASH = "Наличные"
 PAYMENT_CARD = "Карта"
+
+TRANSFER_CASH_TO_CARD = "Наличные → Карта"
+TRANSFER_CARD_TO_CASH = "Карта → Наличные"
 
 CURRENCY_RUB = "RUB"
 

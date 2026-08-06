@@ -17,6 +17,7 @@ from keyboards.inline import (
     saved_keyboard,
     status_records_keyboard,
     status_keyboard,
+    transfer_direction_keyboard,
 )
 from services import reports, sheets
 from services.telegram import TelegramClient, TelegramError
@@ -24,6 +25,7 @@ from states.constants import (
     CURRENCY_RUB,
     OPERATION_EXPENSE,
     OPERATION_INCOME,
+    OPERATION_TRANSFER,
     PAYMENT_CARD,
     PAYMENT_CASH,
     STATE_AMOUNT,
@@ -34,10 +36,13 @@ from states.constants import (
     STATE_DELETE_CONFIRM,
     STATE_DESCRIPTION,
     STATE_PAYMENT_TYPE,
+    STATE_TRANSFER_DIRECTION,
     STATE_STATUS,
     STATE_STATUS_UPDATE,
     STATE_UNDO_SAVED,
     STATE_OPERATION_TYPE,
+    TRANSFER_CARD_TO_CASH,
+    TRANSFER_CASH_TO_CARD,
 )
 
 
@@ -101,7 +106,11 @@ def row_number_from_append_result(result):
 
 def start_add_flow(chat_id, telegram):
     sheets.set_state(chat_id, STATE_OPERATION_TYPE, {})
-    telegram.send_message(chat_id, "📌 Выберите тип операции:", reply_markup=operation_type_keyboard())
+    telegram.send_message(
+        chat_id,
+        "📌 Выберите тип операции:",
+        reply_markup=operation_type_keyboard(include_admin_operations=is_admin_chat(chat_id)),
+    )
 
 
 def start_status_update_flow(chat_id, telegram):
@@ -163,6 +172,7 @@ def build_expense(data, chat_id):
         "Описание": data.get("description", ""),
         "Сумма": data.get("amount", ""),
         "Тип оплаты": data.get("payment_type", ""),
+        "Направление перевода": data.get("transfer_direction", ""),
         "Банк": data.get("bank", ""),
         "Карта или телефон": data.get("card_phone", ""),
         "Статус": data.get("status", ""),
@@ -183,6 +193,8 @@ def expense_notification_text(expense, row_number=None):
             f"💳 Тип оплаты: {expense.get('Тип оплаты')}",
         ]
     )
+    if expense.get("Направление перевода"):
+        lines.append(f"🔁 Направление: {expense.get('Направление перевода')}")
     if expense.get("Банк"):
         lines.append(f"🏦 Банк: {expense.get('Банк')}")
     if expense.get("Карта или телефон"):
@@ -224,7 +236,10 @@ def save_current_expense(chat_id, message_id, data, telegram):
     else:
         sheets.clear_state(chat_id)
     notify_admin_about_expense(telegram, expense, row_number=row_number)
-    telegram.edit_message_text(chat_id, message_id, "✅ Запись сохранена в лист Operations.", reply_markup=saved_keyboard())
+    if message_id:
+        telegram.edit_message_text(chat_id, message_id, "✅ Запись сохранена в лист Operations.", reply_markup=saved_keyboard())
+    else:
+        telegram.send_message(chat_id, "✅ Запись сохранена в лист Operations.", reply_markup=saved_keyboard())
 
 
 def handle_command(chat_id, command, telegram):
@@ -350,14 +365,23 @@ def handle_message(message, telegram):
             return
         data["amount"] = amount
         sheets.set_state(chat_id, STATE_DESCRIPTION, data)
-        telegram.send_message(chat_id, "📝 Введите описание.\nПример: Яндекс Директ")
+        if data.get("operation_type") == OPERATION_TRANSFER:
+            telegram.send_message(chat_id, "📝 Введите описание перевода.\nПример: внесение наличных на карту")
+        else:
+            telegram.send_message(chat_id, "📝 Введите описание.\nПример: Яндекс Директ")
     elif state == STATE_DESCRIPTION:
         if not text:
             telegram.send_message(chat_id, "📝 Описание не должно быть пустым.")
             return
         data["description"] = text[:500]
-        sheets.set_state(chat_id, STATE_CATEGORY, data)
-        telegram.send_message(chat_id, "🏷️ Выберите категорию:", reply_markup=category_keyboard())
+        if data.get("operation_type") == OPERATION_TRANSFER:
+            data["category"] = "Перевод"
+            data["status"] = "Оплачен"
+            data["created_at"] = reports.now_in_timezone(env_timezone()).strftime("%Y-%m-%d %H:%M:%S")
+            save_current_expense(chat_id, None, data, telegram)
+        else:
+            sheets.set_state(chat_id, STATE_CATEGORY, data)
+            telegram.send_message(chat_id, "🏷️ Выберите категорию:", reply_markup=category_keyboard())
     else:
         telegram.send_message(chat_id, "👇 Выберите действие в меню или отправьте /add.", reply_markup=main_menu_keyboard())
 
@@ -411,18 +435,37 @@ def handle_callback(callback, telegram):
 
     if data_value.startswith("operation:") and state == STATE_OPERATION_TYPE:
         selected = data_value.split(":", 1)[1]
-        operation_map = {"income": OPERATION_INCOME, "expense": OPERATION_EXPENSE}
+        operation_map = {"income": OPERATION_INCOME, "expense": OPERATION_EXPENSE, "transfer": OPERATION_TRANSFER}
         data["operation_type"] = operation_map.get(selected)
         if not data["operation_type"]:
             telegram.send_message(chat_id, "Не удалось распознать тип операции. Попробуйте /add заново.")
             sheets.clear_state(chat_id)
             return
-        if data["operation_type"] == OPERATION_INCOME and not is_admin_chat(chat_id):
-            telegram.send_message(chat_id, "🔒 Доход может вносить только администратор.")
+        if data["operation_type"] in (OPERATION_INCOME, OPERATION_TRANSFER) and not is_admin_chat(chat_id):
+            telegram.send_message(chat_id, "🔒 Доход и перевод может вносить только администратор.")
             start_add_flow(chat_id, telegram)
+            return
+        if data["operation_type"] == OPERATION_TRANSFER:
+            sheets.set_state(chat_id, STATE_TRANSFER_DIRECTION, data)
+            telegram.edit_message_text(chat_id, message_id, "🔁 Выберите направление перевода:", reply_markup=transfer_direction_keyboard())
             return
         sheets.set_state(chat_id, STATE_PAYMENT_TYPE, data)
         telegram.edit_message_text(chat_id, message_id, "💳 Выберите способ оплаты:", reply_markup=payment_keyboard())
+        return
+
+    if data_value.startswith("transfer:") and state == STATE_TRANSFER_DIRECTION:
+        selected = data_value.split(":", 1)[1]
+        direction_map = {"cash_to_card": TRANSFER_CASH_TO_CARD, "card_to_cash": TRANSFER_CARD_TO_CASH}
+        direction = direction_map.get(selected)
+        if not direction:
+            telegram.send_message(chat_id, "Не удалось распознать направление перевода. Попробуйте /add заново.")
+            sheets.clear_state(chat_id)
+            return
+        data["transfer_direction"] = direction
+        data["payment_type"] = PAYMENT_CARD if direction == TRANSFER_CASH_TO_CARD else PAYMENT_CASH
+        data["currency"] = CURRENCY_RUB
+        sheets.set_state(chat_id, STATE_BANK, data)
+        telegram.edit_message_text(chat_id, message_id, "🏦 Выберите банк карты:", reply_markup=bank_keyboard())
         return
 
     if data_value.startswith("payment:") and state == STATE_PAYMENT_TYPE:
@@ -447,7 +490,10 @@ def handle_callback(callback, telegram):
         bank = data_value.split(":", 1)[1]
         data["bank"] = bank
         sheets.set_state(chat_id, STATE_CARD_PHONE, data)
-        telegram.edit_message_text(chat_id, message_id, "📱 Введите полный номер карты или номер телефона:")
+        prompt = "📱 Введите полный номер карты или номер телефона:"
+        if data.get("operation_type") == OPERATION_TRANSFER:
+            prompt = "📱 Введите карту или телефон, связанный с переводом:"
+        telegram.edit_message_text(chat_id, message_id, prompt)
         return
 
     if data_value.startswith("category:") and state == STATE_CATEGORY:
