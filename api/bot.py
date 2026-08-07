@@ -248,14 +248,24 @@ def status_update_notification_text(record, status, row_number=None):
     return "\n".join(lines)
 
 
-def notify_owner_about_status_update(telegram, record, status, changed_by_chat_id, row_number=None):
+def notify_about_status_update(telegram, record, status, changed_by_chat_id, row_number=None):
+    recipients = []
     owner_chat_id = str(record.get("Chat ID", "")).strip()
-    if not owner_chat_id or owner_chat_id == str(changed_by_chat_id):
-        return
-    try:
-        telegram.send_message(owner_chat_id, status_update_notification_text(record, status, row_number=row_number))
-    except TelegramError as exc:
-        print(f"Status notification failed for {owner_chat_id}: {exc}", flush=True)
+    if owner_chat_id:
+        recipients.append(owner_chat_id)
+    recipients.extend(admin_chat_ids())
+
+    text = status_update_notification_text(record, status, row_number=row_number)
+    sent = set()
+    for recipient in recipients:
+        recipient = str(recipient).strip()
+        if not recipient or recipient in sent or recipient == str(changed_by_chat_id):
+            continue
+        sent.add(recipient)
+        try:
+            telegram.send_message(recipient, text)
+        except TelegramError as exc:
+            print(f"Status notification failed for {recipient}: {exc}", flush=True)
 
 
 def save_current_expense(chat_id, message_id, data, telegram):
@@ -575,7 +585,7 @@ def handle_callback(callback, telegram):
         record = sheets.get_expense_row(row_number) if row_number else None
         if row_number and record and sheets.update_expense_status(int(row_number), chat_id, status, allow_any=is_admin_chat(chat_id)):
             sheets.clear_state(chat_id)
-            notify_owner_about_status_update(telegram, record, status, chat_id, row_number=row_number)
+            notify_about_status_update(telegram, record, status, chat_id, row_number=row_number)
             telegram.edit_message_text(chat_id, message_id, f"✅ Статус обновлен: {status}")
         else:
             sheets.clear_state(chat_id)
