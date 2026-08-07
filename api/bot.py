@@ -220,6 +220,44 @@ def notify_admin_about_expense(telegram, expense, row_number=None):
             print(f"Admin notification failed for {admin_id}: {exc}", flush=True)
 
 
+def status_update_notification_text(record, status, row_number=None):
+    lines = ["🔄 Статус операции изменен"]
+    if row_number:
+        lines.append(f"📌 Строка: {row_number}")
+    lines.extend(
+        [
+            f"✅ Новый статус: {status}",
+            f"🕒 Дата и время: {record.get('Дата и время')}",
+            f"📌 Тип операции: {record.get('Тип операции')}",
+            f"💳 Тип оплаты: {record.get('Тип оплаты')}",
+        ]
+    )
+    if record.get("Направление перевода"):
+        lines.append(f"🔁 Направление: {record.get('Направление перевода')}")
+    if record.get("Банк"):
+        lines.append(f"🏦 Банк: {record.get('Банк')}")
+    if record.get("Карта или телефон"):
+        lines.append(f"📱 Карта/телефон: {record.get('Карта или телефон')}")
+    lines.extend(
+        [
+            f"🏷️ Категория: {record.get('Категория')}",
+            f"💰 Сумма: {record.get('Сумма')} ₽",
+            f"📝 Описание: {record.get('Описание')}",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def notify_owner_about_status_update(telegram, record, status, changed_by_chat_id, row_number=None):
+    owner_chat_id = str(record.get("Chat ID", "")).strip()
+    if not owner_chat_id or owner_chat_id == str(changed_by_chat_id):
+        return
+    try:
+        telegram.send_message(owner_chat_id, status_update_notification_text(record, status, row_number=row_number))
+    except TelegramError as exc:
+        print(f"Status notification failed for {owner_chat_id}: {exc}", flush=True)
+
+
 def save_current_expense(chat_id, message_id, data, telegram):
     expense = build_expense(data, chat_id)
     result = sheets.append_expense(expense)
@@ -534,8 +572,10 @@ def handle_callback(callback, telegram):
     if data_value.startswith("status_update:") and state == STATE_STATUS_UPDATE:
         status = data_value.split(":", 1)[1]
         row_number = data.get("row_number")
-        if row_number and sheets.update_expense_status(int(row_number), chat_id, status, allow_any=is_admin_chat(chat_id)):
+        record = sheets.get_expense_row(row_number) if row_number else None
+        if row_number and record and sheets.update_expense_status(int(row_number), chat_id, status, allow_any=is_admin_chat(chat_id)):
             sheets.clear_state(chat_id)
+            notify_owner_about_status_update(telegram, record, status, chat_id, row_number=row_number)
             telegram.edit_message_text(chat_id, message_id, f"✅ Статус обновлен: {status}")
         else:
             sheets.clear_state(chat_id)
