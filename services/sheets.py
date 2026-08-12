@@ -201,7 +201,21 @@ def debug_info():
     }
 
 
+def _as_sheet_text(value):
+    value = str(value or "").strip()
+    if not value:
+        return ""
+    return value if value.startswith("'") else "'" + value
+
+
+def _clean_sheet_text(value):
+    value = str(value or "").strip()
+    return value[1:] if value.startswith("'") else value
+
+
 def _append_value(expense, header):
+    if header in ("Карта или телефон", "Карта/телефон", "Номер карты", "Телефон", "Номер карты или телефон"):
+        return _as_sheet_text(expense.get("Карта или телефон", ""))
     if header in expense:
         return expense.get(header, "")
     alias = APPEND_ALIASES.get(header)
@@ -287,6 +301,7 @@ def _raw_record_from_row(row, headers=None):
     for header in EXPENSE_HEADERS:
         aliases = CANONICAL_ALIASES.get(header, (header,))
         record[header] = next((raw.get(alias, "") for alias in aliases if raw.get(alias, "") != ""), "")
+    record["Карта или телефон"] = _clean_sheet_text(record.get("Карта или телефон", ""))
     if not record.get("Тип операции"):
         record["Тип операции"] = "Расход"
     return record
