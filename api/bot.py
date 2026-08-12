@@ -309,15 +309,15 @@ def handle_command(chat_id, command, telegram):
     elif command == "/today":
         rows = sheets.all_expenses()
         start, end = reports.today_range(tz_name)
-        telegram.send_message(chat_id, reports.build_period_report(rows, "Отчет за сегодня", start, end, tz_name, chat_id))
+        telegram.send_message(chat_id, reports.build_period_report(rows, "Отчет за сегодня", start, end, tz_name, None if is_admin_chat(chat_id) else chat_id))
     elif command == "/week":
         rows = sheets.all_expenses()
         start, end = reports.last_7_days_range(tz_name)
-        telegram.send_message(chat_id, reports.build_period_report(rows, "Отчет за последние 7 дней", start, end, tz_name, chat_id))
+        telegram.send_message(chat_id, reports.build_period_report(rows, "Отчет за последние 7 дней", start, end, tz_name, None if is_admin_chat(chat_id) else chat_id))
     elif command == "/month":
         rows = sheets.all_expenses()
         start, end = reports.current_month_range(tz_name)
-        telegram.send_message(chat_id, reports.build_period_report(rows, "Отчет за текущий месяц", start, end, tz_name, chat_id))
+        telegram.send_message(chat_id, reports.build_period_report(rows, "Отчет за текущий месяц", start, end, tz_name, None if is_admin_chat(chat_id) else chat_id))
     elif command == "/history":
         telegram.send_message(chat_id, reports.history_text(sheets.all_expenses(), chat_id, include_all=is_admin_chat(chat_id)))
     elif command == "/status":
@@ -471,13 +471,13 @@ def handle_callback(callback, telegram):
         report_type = data_value.split(":", 1)[1]
         if report_type == "today":
             start, end = reports.today_range(tz_name)
-            text = reports.build_period_report(rows, "Отчет за сегодня", start, end, tz_name, chat_id)
+            text = reports.build_period_report(rows, "Отчет за сегодня", start, end, tz_name, None if is_admin_chat(chat_id) else chat_id)
         elif report_type == "week":
             start, end = reports.last_7_days_range(tz_name)
-            text = reports.build_period_report(rows, "Отчет за последние 7 дней", start, end, tz_name, chat_id)
+            text = reports.build_period_report(rows, "Отчет за последние 7 дней", start, end, tz_name, None if is_admin_chat(chat_id) else chat_id)
         else:
             start, end = reports.current_month_range(tz_name)
-            text = reports.build_period_report(rows, "Отчет за текущий месяц", start, end, tz_name, chat_id)
+            text = reports.build_period_report(rows, "Отчет за текущий месяц", start, end, tz_name, None if is_admin_chat(chat_id) else chat_id)
         telegram.send_message(chat_id, text)
         return
 
