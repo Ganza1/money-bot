@@ -323,11 +323,13 @@ def handle_command(chat_id, command, telegram):
     elif command == "/status":
         start_status_update_flow(chat_id, telegram)
     elif command == "/delete_last":
-        row_number, record = sheets.find_last_expense_row(chat_id)
-        if not row_number:
+        items = sheets.recent_expense_rows(chat_id, limit=1, include_all=is_admin_chat(chat_id))
+        if not items:
             telegram.send_message(chat_id, "📭 Нет записей для удаления.")
             return
-        sheets.set_state(chat_id, STATE_DELETE_CONFIRM, {"row_number": row_number})
+        row_number = items[0]["row_number"]
+        record = items[0]["record"]
+        sheets.set_state(chat_id, STATE_DELETE_CONFIRM, {"row_number": row_number, "record": record})
         telegram.send_message(
             chat_id,
             "🗑️ Удалить последнюю запись?\n"
@@ -609,12 +611,13 @@ def handle_callback(callback, telegram):
 
     if data_value == "delete:confirm" and state == STATE_DELETE_CONFIRM:
         row_number = data.get("row_number")
-        if row_number:
-            sheets.delete_expense_row(int(row_number))
+        record = data.get("record", {})
+        if row_number and record and sheets.delete_expense_row_if_matches(int(row_number), record):
             sheets.clear_state(chat_id)
             telegram.edit_message_text(chat_id, message_id, "🗑️ Последняя запись удалена.")
         else:
-            telegram.edit_message_text(chat_id, message_id, "⚠️ Не удалось найти запись для удаления.")
+            sheets.clear_state(chat_id)
+            telegram.edit_message_text(chat_id, message_id, "⚠️ Не удалось удалить запись: она уже изменена или удалена.")
         return
 
     if data_value == "delete:cancel":
