@@ -30,6 +30,7 @@ from states.constants import (
     PAYMENT_CASH,
     STATE_AMOUNT,
     STATE_BANK,
+    STATE_BANK_CUSTOM,
     STATE_CARD_PHONE,
     STATE_CATEGORY,
     STATE_CONFIRM,
@@ -401,7 +402,17 @@ def handle_message(message, telegram):
     state = current["state"]
     data = current["data"]
 
-    if state == STATE_CARD_PHONE:
+    if state == STATE_BANK_CUSTOM:
+        if not text:
+            telegram.send_message(chat_id, "🏦 Введите название банка.")
+            return
+        data["bank"] = text[:100]
+        sheets.set_state(chat_id, STATE_CARD_PHONE, data)
+        prompt = "📱 Введите полный номер карты или номер телефона:"
+        if data.get("operation_type") == OPERATION_TRANSFER:
+            prompt = "📱 Введите карту или телефон, связанный с переводом:"
+        telegram.send_message(chat_id, prompt)
+    elif state == STATE_CARD_PHONE:
         if not text:
             telegram.send_message(chat_id, "📱 Введите полный номер карты или номер телефона.")
             return
@@ -538,6 +549,10 @@ def handle_callback(callback, telegram):
 
     if data_value.startswith("bank:") and state == STATE_BANK:
         bank = data_value.split(":", 1)[1]
+        if bank == "Другой банк":
+            sheets.set_state(chat_id, STATE_BANK_CUSTOM, data)
+            telegram.edit_message_text(chat_id, message_id, "🏦 Введите название банка:")
+            return
         data["bank"] = bank
         sheets.set_state(chat_id, STATE_CARD_PHONE, data)
         prompt = "📱 Введите полный номер карты или номер телефона:"
