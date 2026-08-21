@@ -59,6 +59,7 @@ def bank_keyboard():
         "Промсвязьбанк": "🟠",
         "Совкомбанк": "🟣",
         "Т-Банк": "🟡",
+        "Другой банк": "✏️",
     }
     rows = [[button(f"{emoji.get(bank, '🏦')} {bank}", f"bank:{bank}")] for bank in BANKS]
     rows.append([button("❌ Отмена", "flow:cancel")])
