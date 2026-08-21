@@ -2,6 +2,7 @@ STATE_OPERATION_TYPE = "operation_type"
 STATE_PAYMENT_TYPE = "payment_type"
 STATE_TRANSFER_DIRECTION = "transfer_direction"
 STATE_BANK = "bank"
+STATE_BANK_CUSTOM = "bank_custom"
 STATE_CARD_PHONE = "card_phone"
 STATE_AMOUNT = "amount"
 STATE_DESCRIPTION = "description"
@@ -32,6 +33,7 @@ BANKS = (
     "Промсвязьбанк",
     "Совкомбанк",
     "Т-Банк",
+    "Другой банк",
 )
 
 CATEGORIES = (
