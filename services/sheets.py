@@ -1,5 +1,6 @@
 import json
 import os
+import time
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
@@ -83,9 +84,32 @@ APPEND_ALIASES = {
     "Кошелек": "",
 }
 
+_CLIENT_CACHE = None
+_SPREADSHEET_CACHE = {}
+_WORKSHEET_CACHE = {}
+_OPERATIONS_HEADERS_CACHE = {}
+
 
 class SheetsError(RuntimeError):
     pass
+
+
+def _is_quota_error(exc):
+    text = str(exc)
+    return "429" in text or "Quota exceeded" in text
+
+
+def _call_with_retry(func, *args, **kwargs):
+    last_error = None
+    for attempt in range(4):
+        try:
+            return func(*args, **kwargs)
+        except gspread.exceptions.APIError as exc:
+            last_error = exc
+            if not _is_quota_error(exc) or attempt == 3:
+                raise
+            time.sleep(0.8 * (attempt + 1))
+    raise last_error
 
 
 def _load_service_account_info():
@@ -99,47 +123,59 @@ def _load_service_account_info():
 
 
 def _client():
+    global _CLIENT_CACHE
+    if _CLIENT_CACHE is not None:
+        return _CLIENT_CACHE
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive",
     ]
     credentials = Credentials.from_service_account_info(_load_service_account_info(), scopes=scopes)
-    return gspread.authorize(credentials)
+    _CLIENT_CACHE = gspread.authorize(credentials)
+    return _CLIENT_CACHE
 
 
 def _spreadsheet():
     sheet_id = os.environ.get("GOOGLE_SHEET_ID")
     if not sheet_id:
         raise SheetsError("GOOGLE_SHEET_ID is not configured")
-    return _client().open_by_key(sheet_id)
+    if sheet_id not in _SPREADSHEET_CACHE:
+        _SPREADSHEET_CACHE[sheet_id] = _call_with_retry(_client().open_by_key, sheet_id)
+    return _SPREADSHEET_CACHE[sheet_id]
 
 
 def _worksheet(spreadsheet, title, headers):
-    try:
-        worksheet = spreadsheet.worksheet(title)
-    except gspread.WorksheetNotFound:
-        worksheet = spreadsheet.add_worksheet(title=title, rows=1000, cols=max(len(headers), 10))
+    cache_key = (spreadsheet.id, title)
+    if cache_key in _WORKSHEET_CACHE:
+        return _WORKSHEET_CACHE[cache_key]
 
-    first_row = worksheet.row_values(1)
+    try:
+        worksheet = _call_with_retry(spreadsheet.worksheet, title)
+    except gspread.WorksheetNotFound:
+        worksheet = _call_with_retry(spreadsheet.add_worksheet, title=title, rows=1000, cols=max(len(headers), 10))
+
+    first_row = _call_with_retry(worksheet.row_values, 1)
     if first_row != headers:
-        worksheet.resize(rows=max(worksheet.row_count, 1000), cols=max(len(headers), worksheet.col_count))
-        worksheet.update("A1", [headers])
+        _call_with_retry(worksheet.resize, rows=max(worksheet.row_count, 1000), cols=max(len(headers), worksheet.col_count))
+        _call_with_retry(worksheet.update, "A1", [headers])
+    _WORKSHEET_CACHE[cache_key] = worksheet
     return worksheet
 
 
 def _summary_worksheet(spreadsheet):
-    try:
-        return spreadsheet.worksheet(SUMMARY_SHEET)
-    except gspread.WorksheetNotFound:
-        return spreadsheet.add_worksheet(title=SUMMARY_SHEET, rows=20, cols=3)
+    return _worksheet(spreadsheet, SUMMARY_SHEET, ["Итоги", "Значение", "Комментарий"])
 
 
 def _operations_worksheet(spreadsheet):
+    cache_key = (spreadsheet.id, EXPENSES_SHEET)
+    if cache_key in _WORKSHEET_CACHE:
+        return _WORKSHEET_CACHE[cache_key]
     try:
-        worksheet = spreadsheet.worksheet(EXPENSES_SHEET)
+        worksheet = _call_with_retry(spreadsheet.worksheet, EXPENSES_SHEET)
     except gspread.WorksheetNotFound:
-        worksheet = spreadsheet.add_worksheet(title=EXPENSES_SHEET, rows=1000, cols=len(EXPENSE_HEADERS))
-        worksheet.update("A1", [EXPENSE_HEADERS])
+        worksheet = _call_with_retry(spreadsheet.add_worksheet, title=EXPENSES_SHEET, rows=1000, cols=len(EXPENSE_HEADERS))
+        _call_with_retry(worksheet.update, "A1", [EXPENSE_HEADERS])
+    _WORKSHEET_CACHE[cache_key] = worksheet
     return worksheet
 
 
@@ -149,15 +185,21 @@ def _sheet_headers(rows):
 
 
 def _ensure_optional_operations_headers(worksheet):
-    headers = [str(cell).strip() for cell in worksheet.row_values(1)]
+    cache_key = worksheet.id
+    if cache_key in _OPERATIONS_HEADERS_CACHE:
+        return _OPERATIONS_HEADERS_CACHE[cache_key]
+
+    headers = [str(cell).strip() for cell in _call_with_retry(worksheet.row_values, 1)]
     if not headers:
-        worksheet.update("A1", [EXPENSE_HEADERS])
+        _call_with_retry(worksheet.update, "A1", [EXPENSE_HEADERS])
+        _OPERATIONS_HEADERS_CACHE[cache_key] = EXPENSE_HEADERS
         return EXPENSE_HEADERS
 
     missing_headers = [header for header in ("Направление перевода", "Банк", "Карта или телефон", "Тип операции") if header not in headers]
     if missing_headers:
         headers.extend(missing_headers)
-        worksheet.update("A1", [headers])
+        _call_with_retry(worksheet.update, "A1", [headers])
+    _OPERATIONS_HEADERS_CACHE[cache_key] = headers
     return headers
 
 
@@ -178,7 +220,7 @@ def ensure_sheets():
     operations = _operations_worksheet(spreadsheet)
     _worksheet(spreadsheet, STATES_SHEET, STATE_HEADERS)
     _summary_worksheet(spreadsheet)
-    _update_summary_from_rows(spreadsheet, operations.get_all_values())
+    _update_summary_from_rows(spreadsheet, _call_with_retry(operations.get_all_values))
 
 
 def debug_info():
@@ -186,9 +228,9 @@ def debug_info():
     operations = _operations_worksheet(spreadsheet)
     states = _worksheet(spreadsheet, STATES_SHEET, STATE_HEADERS)
     summary = _summary_worksheet(spreadsheet)
-    operation_rows = operations.get_all_values()
-    state_rows = states.get_all_values()
-    summary_rows = summary.get_all_values()
+    operation_rows = _call_with_retry(operations.get_all_values)
+    state_rows = _call_with_retry(states.get_all_values)
+    summary_rows = _call_with_retry(summary.get_all_values)
     headers = _sheet_headers(operation_rows)
     return {
         "sheet_id": os.environ.get("GOOGLE_SHEET_ID", ""),
@@ -232,13 +274,13 @@ def append_expense(expense):
     worksheet = get_expenses_sheet()
     headers = _headers_for_append(worksheet)
     row = [_append_value(expense, header) for header in headers]
-    result = worksheet.append_row(row, value_input_option="USER_ENTERED")
+    result = _call_with_retry(worksheet.append_row, row, value_input_option="USER_ENTERED")
     _try_update_summary()
     return result
 
 
 def all_expenses():
-    return _records_from_values(get_expenses_sheet().get_all_values())
+    return _records_from_values(_call_with_retry(get_expenses_sheet().get_all_values))
 
 
 def _records_from_values(rows):
@@ -359,7 +401,7 @@ def _repair_value_for_header(record, header):
 def repair_shifted_operation_rows():
     worksheet = get_expenses_sheet()
     _ensure_optional_operations_headers(worksheet)
-    rows = worksheet.get_all_values()
+    rows = _call_with_retry(worksheet.get_all_values)
     if not rows:
         return {"checked": 0, "fixed": 0}
 
@@ -382,7 +424,7 @@ def repair_shifted_operation_rows():
             if column:
                 updates.append({"range": rowcol_to_a1(row_number, column), "values": [[value]]})
         if updates:
-            worksheet.batch_update(updates, value_input_option="USER_ENTERED")
+            _call_with_retry(worksheet.batch_update, updates, value_input_option="USER_ENTERED")
             fixed += 1
 
     if fixed:
@@ -402,20 +444,18 @@ def _update_summary_from_rows(spreadsheet, rows):
 
     worksheet = _summary_worksheet(spreadsheet)
     values = reports.summary_sheet_values(_records_from_values(rows))
-    worksheet.clear()
-    worksheet.update("A1", values, value_input_option="USER_ENTERED")
+    _call_with_retry(worksheet.clear)
+    _call_with_retry(worksheet.update, "A1", values, value_input_option="USER_ENTERED")
 
 
 def update_summary():
     spreadsheet = _spreadsheet()
     operations = _operations_worksheet(spreadsheet)
-    _update_summary_from_rows(spreadsheet, operations.get_all_values())
+    _update_summary_from_rows(spreadsheet, _call_with_retry(operations.get_all_values))
 
 
-def get_state(chat_id):
-    worksheet = get_states_sheet()
+def _state_from_rows(chat_id, rows):
     chat_id = str(chat_id)
-    rows = worksheet.get_all_values()
     for index, row in enumerate(rows[1:], start=2):
         if row and row[0] == chat_id:
             data = {}
@@ -428,26 +468,34 @@ def get_state(chat_id):
     return {"row": None, "state": "", "data": {}}
 
 
+def get_state(chat_id):
+    worksheet = get_states_sheet()
+    rows = _call_with_retry(worksheet.get_all_values)
+    return _state_from_rows(chat_id, rows)
+
+
 def set_state(chat_id, state, data):
     worksheet = get_states_sheet()
-    current = get_state(chat_id)
+    rows = _call_with_retry(worksheet.get_all_values)
+    current = _state_from_rows(chat_id, rows)
     values = [str(chat_id), state, json.dumps(data, ensure_ascii=False), datetime.utcnow().isoformat(timespec="seconds")]
     if current["row"]:
-        worksheet.update(f"A{current['row']}:D{current['row']}", [values])
+        _call_with_retry(worksheet.update, f"A{current['row']}:D{current['row']}", [values])
     else:
-        worksheet.append_row(values, value_input_option="USER_ENTERED")
+        _call_with_retry(worksheet.append_row, values, value_input_option="USER_ENTERED")
 
 
 def clear_state(chat_id):
     worksheet = get_states_sheet()
-    current = get_state(chat_id)
+    rows = _call_with_retry(worksheet.get_all_values)
+    current = _state_from_rows(chat_id, rows)
     if current["row"]:
-        worksheet.delete_rows(current["row"])
+        _call_with_retry(worksheet.delete_rows, current["row"])
 
 
 def find_last_expense_row(chat_id):
     worksheet = get_expenses_sheet()
-    rows = worksheet.get_all_values()
+    rows = _call_with_retry(worksheet.get_all_values)
     headers = _sheet_headers(rows)
     chat_id = str(chat_id)
     for index in range(len(rows), 1, -1):
@@ -459,7 +507,7 @@ def find_last_expense_row(chat_id):
 
 def recent_expense_rows(chat_id, limit=10, include_all=False):
     worksheet = get_expenses_sheet()
-    rows = worksheet.get_all_values()
+    rows = _call_with_retry(worksheet.get_all_values)
     headers = _sheet_headers(rows)
     chat_id = str(chat_id)
     result = []
@@ -473,13 +521,13 @@ def recent_expense_rows(chat_id, limit=10, include_all=False):
 
 
 def delete_expense_row(row_number):
-    get_expenses_sheet().delete_rows(row_number)
+    _call_with_retry(get_expenses_sheet().delete_rows, row_number)
     _try_update_summary()
 
 
 def get_expense_row(row_number):
     worksheet = get_expenses_sheet()
-    rows = worksheet.get_all_values()
+    rows = _call_with_retry(worksheet.get_all_values)
     row_number = int(row_number)
     if row_number < 1 or row_number > len(rows):
         return None
@@ -488,7 +536,7 @@ def get_expense_row(row_number):
 
 def update_expense_status(row_number, chat_id, status, allow_any=False):
     worksheet = get_expenses_sheet()
-    rows = worksheet.get_all_values()
+    rows = _call_with_retry(worksheet.get_all_values)
     headers = _sheet_headers(rows)
     row_number = int(row_number)
     if row_number < 1 or row_number > len(rows):
@@ -496,7 +544,7 @@ def update_expense_status(row_number, chat_id, status, allow_any=False):
     current = _record_from_row(rows[row_number - 1], headers=headers)
     if not allow_any and str(current.get("Chat ID", "")) != str(chat_id):
         return False
-    worksheet.update_cell(row_number, _status_column_from_headers(headers), status)
+    _call_with_retry(worksheet.update_cell, row_number, _status_column_from_headers(headers), status)
     _try_update_summary()
     return True
 
