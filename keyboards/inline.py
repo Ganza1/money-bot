@@ -130,12 +130,13 @@ def edit_records_keyboard(items):
 def edit_fields_keyboard(record):
     rows = [
         [button("💰 Сумма", "edit_field:amount"), button("📝 Описание", "edit_field:description")],
-        [button("🏷️ Категория", "edit_field:category"), button("💳 Источник", "edit_field:payment")],
     ]
-    if record.get("Тип оплаты") == "Карта" or record.get("Банк") or record.get("Карта или телефон"):
-        rows.append([button("🏦 Банк", "edit_field:bank"), button("📱 Карта/телефон", "edit_field:card_phone")])
     if record.get("Тип операции") == OPERATION_TRANSFER:
         rows.append([button("🔁 Направление", "edit_field:direction")])
+    else:
+        rows.append([button("🏷️ Категория", "edit_field:category"), button("💳 Источник", "edit_field:payment")])
+    if record.get("Тип оплаты") == "Карта" or record.get("Банк") or record.get("Карта или телефон"):
+        rows.append([button("🏦 Банк", "edit_field:bank"), button("📱 Карта/телефон", "edit_field:card_phone")])
     rows.append([button("❌ Отмена", "flow:cancel")])
     return inline_keyboard(rows)
 
