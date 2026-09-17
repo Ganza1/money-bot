@@ -13,8 +13,8 @@ def main_menu_keyboard():
     return inline_keyboard(
         [
             [button("➕ Добавить операцию", "cmd:add"), button("📊 Отчет", "cmd:report")],
-            [button("📜 История", "cmd:history"), button("🔁 Статус", "cmd:status")],
-            [button("ℹ Помощь", "cmd:help")],
+            [button("📜 История", "cmd:history"), button("✏️ Изменить", "cmd:edit")],
+            [button("🔁 Статус", "cmd:status"), button("ℹ Помощь", "cmd:help")],
         ]
     )
 
@@ -109,6 +109,77 @@ def status_records_keyboard(items):
         rows.append([button(label, f"status_row:{item['row_number']}")])
     rows.append([button("❌ Отмена", "flow:cancel")])
     return inline_keyboard(rows)
+
+
+def edit_records_keyboard(items):
+    rows = []
+    for index, item in enumerate(items, start=1):
+        record = item["record"]
+        label = (
+            f"{index}. {record.get('Дата и время', '')} | "
+            f"{record.get('Тип операции', '')} | {record.get('Сумма', '')} ₽ | "
+            f"{record.get('Описание', '')}"
+        )
+        if len(label) > 60:
+            label = label[:57] + "..."
+        rows.append([button(label, f"edit_row:{item['row_number']}")])
+    rows.append([button("❌ Отмена", "flow:cancel")])
+    return inline_keyboard(rows)
+
+
+def edit_fields_keyboard(record):
+    rows = [
+        [button("💰 Сумма", "edit_field:amount"), button("📝 Описание", "edit_field:description")],
+        [button("🏷️ Категория", "edit_field:category"), button("💳 Источник", "edit_field:payment")],
+    ]
+    if record.get("Тип оплаты") == "Карта" or record.get("Банк") or record.get("Карта или телефон"):
+        rows.append([button("🏦 Банк", "edit_field:bank"), button("📱 Карта/телефон", "edit_field:card_phone")])
+    if record.get("Тип операции") == OPERATION_TRANSFER:
+        rows.append([button("🔁 Направление", "edit_field:direction")])
+    rows.append([button("❌ Отмена", "flow:cancel")])
+    return inline_keyboard(rows)
+
+
+def edit_category_keyboard():
+    emoji = {
+        "Подписки": "💳", "Зарплата": "💰", "Офис": "🏢", "М": "Ⓜ️",
+        "Агенты": "🤝", "HR": "👥", "Обучение": "🎓",
+        "Маркетинг": "📢", "Прочее": "📁",
+    }
+    rows = [[button(f"{emoji.get(value, '')} {value}".strip(), f"edit_value:category:{value}")] for value in CATEGORIES]
+    rows.append([button("❌ Отмена", "flow:cancel")])
+    return inline_keyboard(rows)
+
+
+def edit_payment_keyboard():
+    return inline_keyboard(
+        [
+            [button("💵 Наличные", "edit_value:payment:Наличные")],
+            [button("🏦 Карта", "edit_value:payment:Карта")],
+            [button("❌ Отмена", "flow:cancel")],
+        ]
+    )
+
+
+def edit_bank_keyboard():
+    emoji = {
+        "Сбербанк": "🟢", "ВТБ": "🔵", "Газпромбанк": "🧭",
+        "Альфа-Банк": "🔴", "Промсвязьбанк": "🟠", "Совкомбанк": "🟣",
+        "Т-Банк": "🟡", "Другой банк": "✏️",
+    }
+    rows = [[button(f"{emoji.get(value, '🏦')} {value}", f"edit_value:bank:{value}")] for value in BANKS]
+    rows.append([button("❌ Отмена", "flow:cancel")])
+    return inline_keyboard(rows)
+
+
+def edit_direction_keyboard():
+    return inline_keyboard(
+        [
+            [button(f"💵➡️🏦 {TRANSFER_CASH_TO_CARD}", "edit_value:direction:cash_to_card")],
+            [button(f"🏦➡️💵 {TRANSFER_CARD_TO_CASH}", "edit_value:direction:card_to_cash")],
+            [button("❌ Отмена", "flow:cancel")],
+        ]
+    )
 
 
 def confirm_keyboard():
