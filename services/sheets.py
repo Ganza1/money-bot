@@ -549,6 +549,58 @@ def update_expense_status(row_number, chat_id, status, allow_any=False):
     return True
 
 
+EDITABLE_OPERATION_FIELDS = {
+    "Сумма",
+    "Описание",
+    "Категория",
+    "Тип оплаты",
+    "Банк",
+    "Карта или телефон",
+    "Направление перевода",
+}
+
+
+def _column_for_canonical_header(headers, canonical_header):
+    aliases = CANONICAL_ALIASES.get(canonical_header, (canonical_header,))
+    for alias in aliases:
+        column = _column_number(headers, alias)
+        if column:
+            return column
+    return None
+
+
+def update_expense_fields(row_number, chat_id, updates, allow_any=False):
+    worksheet = get_expenses_sheet()
+    rows = _call_with_retry(worksheet.get_all_values)
+    headers = _sheet_headers(rows)
+    row_number = int(row_number)
+    if row_number < 2 or row_number > len(rows):
+        return False
+
+    current = _record_from_row(rows[row_number - 1], headers=headers)
+    if not allow_any and str(current.get("Chat ID", "")) != str(chat_id):
+        return False
+
+    cell_updates = []
+    for field, value in updates.items():
+        if field not in EDITABLE_OPERATION_FIELDS:
+            continue
+        column = _column_for_canonical_header(headers, field)
+        if not column:
+            continue
+        if field == "Карта или телефон":
+            value = _as_sheet_text(value)
+        cell_updates.append(
+            {"range": rowcol_to_a1(row_number, column), "values": [[value]]}
+        )
+
+    if not cell_updates:
+        return False
+    _call_with_retry(worksheet.batch_update, cell_updates, value_input_option="USER_ENTERED")
+    _try_update_summary()
+    return True
+
+
 def expense_matches(record, expected):
     if not record:
         return False
