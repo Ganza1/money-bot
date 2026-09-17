@@ -13,8 +13,9 @@ def main_menu_keyboard():
     return inline_keyboard(
         [
             [button("➕ Добавить операцию", "cmd:add"), button("📊 Отчет", "cmd:report")],
-            [button("📜 История", "cmd:history"), button("✏️ Изменить", "cmd:edit")],
-            [button("🔁 Статус", "cmd:status"), button("ℹ Помощь", "cmd:help")],
+            [button("📜 История", "cmd:history"), button("💰 Остатки", "cmd:balance")],
+            [button("✏️ Изменить", "cmd:edit"), button("🔁 Статус", "cmd:status")],
+            [button("ℹ Помощь", "cmd:help")],
         ]
     )
 
