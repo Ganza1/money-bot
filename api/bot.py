@@ -10,6 +10,12 @@ from keyboards.inline import (
     category_keyboard,
     confirm_keyboard,
     delete_confirm_keyboard,
+    edit_bank_keyboard,
+    edit_category_keyboard,
+    edit_direction_keyboard,
+    edit_fields_keyboard,
+    edit_payment_keyboard,
+    edit_records_keyboard,
     main_menu_keyboard,
     operation_type_keyboard,
     payment_keyboard,
@@ -36,6 +42,8 @@ from states.constants import (
     STATE_CONFIRM,
     STATE_DELETE_CONFIRM,
     STATE_DESCRIPTION,
+    STATE_EDIT_FIELD,
+    STATE_EDIT_TEXT,
     STATE_PAYMENT_TYPE,
     STATE_TRANSFER_DIRECTION,
     STATE_STATUS,
@@ -116,7 +124,7 @@ def start_add_flow(chat_id, telegram):
 
 def start_status_update_flow(chat_id, telegram):
     include_all = is_admin_chat(chat_id)
-    items = sheets.recent_expense_rows(chat_id, limit=10, include_all=include_all)
+    items = sheets.recent_expense_rows(chat_id, limit=30, include_all=include_all)
     if not items:
         telegram.send_message(chat_id, "📭 Нет операций для изменения статуса.")
         return
@@ -127,6 +135,19 @@ def start_status_update_flow(chat_id, telegram):
         title,
         reply_markup=status_records_keyboard(items),
     )
+
+
+def start_edit_flow(chat_id, telegram):
+    include_all = is_admin_chat(chat_id)
+    items = sheets.recent_expense_rows(chat_id, limit=30, include_all=include_all)
+    if not items:
+        telegram.send_message(chat_id, "📭 Нет операций для изменения.")
+        return
+    sheets.clear_state(chat_id)
+    title = "✏️ Выберите платеж для изменения:"
+    if include_all:
+        title = "✏️ Выберите платеж для изменения по всей таблице:"
+    telegram.send_message(chat_id, title, reply_markup=edit_records_keyboard(items))
 
 
 def send_start(chat_id, telegram):
@@ -148,7 +169,8 @@ def send_help(chat_id, telegram):
                 "🗓️ /week - отчет за последние 7 дней",
                 "📆 /month - отчет за текущий месяц",
                 "📜 /history - последние 20 операций",
-                "🔄 /status - изменить статус одной из последних 10 операций",
+                "✏️ /edit - изменить один из последних 30 платежей",
+                "🔄 /status - изменить статус одной из последних 30 операций",
                 "🗑️ /delete_last - удалить последнюю запись",
                 "🕒 /time - текущее время Europe/Moscow",
                 "🆔 /id - показать chat_id",
@@ -323,6 +345,8 @@ def handle_command(chat_id, command, telegram):
         telegram.send_message(chat_id, reports.history_text(sheets.all_expenses(), chat_id, include_all=is_admin_chat(chat_id)))
     elif command == "/status":
         start_status_update_flow(chat_id, telegram)
+    elif command == "/edit":
+        start_edit_flow(chat_id, telegram)
     elif command == "/delete_last":
         items = sheets.recent_expense_rows(chat_id, limit=1, include_all=is_admin_chat(chat_id))
         if not items:
@@ -402,7 +426,29 @@ def handle_message(message, telegram):
     state = current["state"]
     data = current["data"]
 
-    if state == STATE_BANK_CUSTOM:
+    if state == STATE_EDIT_TEXT:
+        row_number = data.get("row_number")
+        field = data.get("field")
+        if field == "Сумма":
+            value = parse_amount(text)
+            if value is None:
+                telegram.send_message(chat_id, "💰 Введите положительную сумму числом. Например: 2500")
+                return
+        else:
+            value = text.strip()
+            if not value:
+                telegram.send_message(chat_id, "⚠️ Значение не должно быть пустым.")
+                return
+            value = value[:500] if field == "Описание" else value[:100]
+        if row_number and sheets.update_expense_fields(
+            int(row_number), chat_id, {field: value}, allow_any=is_admin_chat(chat_id)
+        ):
+            sheets.clear_state(chat_id)
+            telegram.send_message(chat_id, f"✅ Платеж изменен.\\n{field}: {value}")
+        else:
+            sheets.clear_state(chat_id)
+            telegram.send_message(chat_id, "⚠️ Не удалось изменить платеж: операция не найдена.")
+    elif state == STATE_BANK_CUSTOM:
         if not text:
             telegram.send_message(chat_id, "🏦 Введите название банка.")
             return
@@ -476,6 +522,8 @@ def handle_callback(callback, telegram):
             show_report_menu(chat_id, telegram)
         elif command == "status":
             start_status_update_flow(chat_id, telegram)
+        elif command == "edit":
+            start_edit_flow(chat_id, telegram)
         return
 
     if data_value.startswith("report:"):
@@ -575,6 +623,84 @@ def handle_callback(callback, telegram):
         created_at = reports.now_in_timezone(tz_name)
         data["created_at"] = created_at.strftime("%Y-%m-%d %H:%M:%S")
         save_current_expense(chat_id, message_id, data, telegram)
+        return
+
+    if data_value.startswith("edit_row:"):
+        row_number = data_value.split(":", 1)[1]
+        record = sheets.get_expense_row(row_number)
+        if not record or (not is_admin_chat(chat_id) and str(record.get("Chat ID", "")) != str(chat_id)):
+            sheets.clear_state(chat_id)
+            telegram.edit_message_text(chat_id, message_id, "⚠️ Не удалось найти этот платеж.")
+            return
+        sheets.set_state(chat_id, STATE_EDIT_FIELD, {"row_number": int(row_number)})
+        telegram.edit_message_text(
+            chat_id,
+            message_id,
+            "✏️ Что изменить?\\n"
+            f"{record.get('Дата и время')} | {record.get('Тип операции')} | "
+            f"{record.get('Сумма')} ₽ | {record.get('Описание')}",
+            reply_markup=edit_fields_keyboard(record),
+        )
+        return
+
+    if data_value.startswith("edit_field:") and state == STATE_EDIT_FIELD:
+        field_key = data_value.split(":", 1)[1]
+        row_number = data.get("row_number")
+        field_map = {
+            "amount": ("Сумма", "💰 Введите новую сумму:"),
+            "description": ("Описание", "📝 Введите новое описание:"),
+            "card_phone": ("Карта или телефон", "📱 Введите новый полный номер карты или телефона:"),
+        }
+        if field_key in field_map:
+            field, prompt = field_map[field_key]
+            sheets.set_state(chat_id, STATE_EDIT_TEXT, {"row_number": row_number, "field": field})
+            telegram.edit_message_text(chat_id, message_id, prompt)
+        elif field_key == "category":
+            telegram.edit_message_text(chat_id, message_id, "🏷️ Выберите новую категорию:", reply_markup=edit_category_keyboard())
+        elif field_key == "payment":
+            telegram.edit_message_text(chat_id, message_id, "💳 Выберите новый источник:", reply_markup=edit_payment_keyboard())
+        elif field_key == "bank":
+            telegram.edit_message_text(chat_id, message_id, "🏦 Выберите новый банк:", reply_markup=edit_bank_keyboard())
+        elif field_key == "direction":
+            telegram.edit_message_text(chat_id, message_id, "🔁 Выберите новое направление:", reply_markup=edit_direction_keyboard())
+        return
+
+    if data_value.startswith("edit_value:") and state == STATE_EDIT_FIELD:
+        _, field_key, selected = data_value.split(":", 2)
+        row_number = data.get("row_number")
+        updates = {}
+        if field_key == "category":
+            updates = {"Категория": selected}
+        elif field_key == "payment":
+            updates = {"Тип оплаты": selected}
+            if selected == PAYMENT_CASH:
+                updates.update({"Банк": "", "Карта или телефон": ""})
+        elif field_key == "bank":
+            if selected == "Другой банк":
+                sheets.set_state(chat_id, STATE_EDIT_TEXT, {"row_number": row_number, "field": "Банк"})
+                telegram.edit_message_text(chat_id, message_id, "🏦 Введите новое название банка:")
+                return
+            updates = {"Банк": selected}
+        elif field_key == "direction":
+            direction_map = {
+                "cash_to_card": TRANSFER_CASH_TO_CARD,
+                "card_to_cash": TRANSFER_CARD_TO_CASH,
+            }
+            direction = direction_map.get(selected)
+            if direction:
+                updates = {
+                    "Направление перевода": direction,
+                    "Тип оплаты": PAYMENT_CARD if direction == TRANSFER_CASH_TO_CARD else PAYMENT_CASH,
+                }
+        if row_number and updates and sheets.update_expense_fields(
+            int(row_number), chat_id, updates, allow_any=is_admin_chat(chat_id)
+        ):
+            sheets.clear_state(chat_id)
+            changed = "\\n".join(f"{key}: {value or 'очищено'}" for key, value in updates.items())
+            telegram.edit_message_text(chat_id, message_id, f"✅ Платеж изменен.\\n{changed}")
+        else:
+            sheets.clear_state(chat_id)
+            telegram.edit_message_text(chat_id, message_id, "⚠️ Не удалось изменить платеж.")
         return
 
     if data_value.startswith("status_row:"):
