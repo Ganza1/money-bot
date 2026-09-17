@@ -11,6 +11,8 @@ STATE_STATUS = "status"
 STATE_CONFIRM = "confirm"
 STATE_DELETE_CONFIRM = "delete_confirm"
 STATE_STATUS_UPDATE = "status_update"
+STATE_EDIT_FIELD = "edit_field"
+STATE_EDIT_TEXT = "edit_text"
 STATE_UNDO_SAVED = "undo_saved"
 
 OPERATION_INCOME = "Доход"
