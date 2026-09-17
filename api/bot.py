@@ -158,6 +158,13 @@ def send_start(chat_id, telegram):
     )
 
 
+def send_balance(chat_id, telegram):
+    rows = sheets.all_expenses()
+    if not is_admin_chat(chat_id):
+        rows = [row for row in rows if str(row.get("Chat ID", "")) == str(chat_id)]
+    telegram.send_message(chat_id, reports.balance_text(rows, env_timezone()))
+
+
 def send_help(chat_id, telegram):
     telegram.send_message(
         chat_id,
@@ -169,6 +176,7 @@ def send_help(chat_id, telegram):
                 "🗓️ /week - отчет за последние 7 дней",
                 "📆 /month - отчет за текущий месяц",
                 "📜 /history - последние 20 операций",
+                "💰 /balance - текущие остатки карты и наличных",
                 "✏️ /edit - изменить один из последних 30 платежей",
                 "🔄 /status - изменить статус одной из последних 30 операций",
                 "🗑️ /delete_last - удалить последнюю запись",
@@ -343,6 +351,8 @@ def handle_command(chat_id, command, telegram):
         telegram.send_message(chat_id, reports.build_period_report(rows, "Отчет за текущий месяц", start, end, tz_name, None if is_admin_chat(chat_id) else chat_id))
     elif command == "/history":
         telegram.send_message(chat_id, reports.history_text(sheets.all_expenses(), chat_id, include_all=is_admin_chat(chat_id)))
+    elif command in ("/balance", "/ostatki"):
+        send_balance(chat_id, telegram)
     elif command == "/status":
         start_status_update_flow(chat_id, telegram)
     elif command == "/edit":
@@ -520,6 +530,8 @@ def handle_callback(callback, telegram):
             send_help(chat_id, telegram)
         elif command == "report":
             show_report_menu(chat_id, telegram)
+        elif command == "balance":
+            send_balance(chat_id, telegram)
         elif command == "status":
             start_status_update_flow(chat_id, telegram)
         elif command == "edit":
