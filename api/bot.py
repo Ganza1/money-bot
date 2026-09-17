@@ -444,7 +444,7 @@ def handle_message(message, telegram):
             int(row_number), chat_id, {field: value}, allow_any=is_admin_chat(chat_id)
         ):
             sheets.clear_state(chat_id)
-            telegram.send_message(chat_id, f"✅ Платеж изменен.\\n{field}: {value}")
+            telegram.send_message(chat_id, f"✅ Платеж изменен.\n{field}: {value}")
         else:
             sheets.clear_state(chat_id)
             telegram.send_message(chat_id, "⚠️ Не удалось изменить платеж: операция не найдена.")
@@ -636,7 +636,7 @@ def handle_callback(callback, telegram):
         telegram.edit_message_text(
             chat_id,
             message_id,
-            "✏️ Что изменить?\\n"
+            "✏️ Что изменить?\n"
             f"{record.get('Дата и время')} | {record.get('Тип операции')} | "
             f"{record.get('Сумма')} ₽ | {record.get('Описание')}",
             reply_markup=edit_fields_keyboard(record),
@@ -696,8 +696,8 @@ def handle_callback(callback, telegram):
             int(row_number), chat_id, updates, allow_any=is_admin_chat(chat_id)
         ):
             sheets.clear_state(chat_id)
-            changed = "\\n".join(f"{key}: {value or 'очищено'}" for key, value in updates.items())
-            telegram.edit_message_text(chat_id, message_id, f"✅ Платеж изменен.\\n{changed}")
+            changed = "\n".join(f"{key}: {value or 'очищено'}" for key, value in updates.items())
+            telegram.edit_message_text(chat_id, message_id, f"✅ Платеж изменен.\n{changed}")
         else:
             sheets.clear_state(chat_id)
             telegram.edit_message_text(chat_id, message_id, "⚠️ Не удалось изменить платеж.")
