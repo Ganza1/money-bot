@@ -885,7 +885,7 @@ def handle_callback(callback, telegram):
             telegram.send_message(owner_chat_id, "❌ Администратор отклонил удаление операции.")
         return
 
-    if data_value == "delete:confirm" and state == STATE_DELETE_CONFIRM:
+    if data_value == "delete:confirm" and state == STATE_DELETE_CONFIRM and not data.get("requires_approval"):
         row_number = data.get("row_number")
         record = data.get("record", {})
         if row_number and record and sheets.delete_expense_row_if_matches(int(row_number), record):
