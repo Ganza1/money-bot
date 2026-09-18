@@ -9,6 +9,25 @@ def inline_keyboard(rows):
     return {"inline_keyboard": rows}
 
 
+
+def main_reply_keyboard(include_balance=False):
+    rows = [
+        [{"text": "➕ Добавить операцию"}, {"text": "📊 Отчет"}],
+        [{"text": "📜 История"}, {"text": "🗑️ Удалить"}],
+        [{"text": "✏️ Изменить"}, {"text": "🔁 Статус"}],
+    ]
+    if include_balance:
+        rows.append([{"text": "💰 Остатки"}])
+    rows.append([{"text": "ℹ️ Помощь"}])
+    return {
+        "keyboard": rows,
+        "resize_keyboard": True,
+        "is_persistent": True,
+        "one_time_keyboard": False,
+        "input_field_placeholder": "Выберите действие",
+    }
+
+
 def main_menu_keyboard(include_balance=False):
     rows = [
         [button("➕ Добавить операцию", "cmd:add"), button("📊 Отчет", "cmd:report")],
