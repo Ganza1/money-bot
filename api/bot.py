@@ -9,7 +9,10 @@ from keyboards.inline import (
     bank_keyboard,
     category_keyboard,
     confirm_keyboard,
+    delete_approval_keyboard,
     delete_confirm_keyboard,
+    delete_records_keyboard,
+    delete_request_keyboard,
     edit_bank_keyboard,
     edit_category_keyboard,
     edit_direction_keyboard,
@@ -40,7 +43,9 @@ from states.constants import (
     STATE_CARD_PHONE,
     STATE_CATEGORY,
     STATE_CONFIRM,
+    STATE_DELETE_APPROVAL,
     STATE_DELETE_CONFIRM,
+    STATE_DELETE_SELECT,
     STATE_DESCRIPTION,
     STATE_EDIT_FIELD,
     STATE_EDIT_TEXT,
@@ -150,43 +155,75 @@ def start_edit_flow(chat_id, telegram):
     telegram.send_message(chat_id, title, reply_markup=edit_records_keyboard(items))
 
 
+
+def start_delete_flow(chat_id, telegram):
+    if is_admin_chat(chat_id):
+        items = sheets.recent_expense_rows(chat_id, limit=1, include_all=True)
+        if not items:
+            telegram.send_message(chat_id, "📭 Нет записей для удаления.")
+            return
+        row_number = items[0]["row_number"]
+        record = items[0]["record"]
+        sheets.set_state(chat_id, STATE_DELETE_CONFIRM, {"row_number": row_number, "record": record})
+        telegram.send_message(
+            chat_id,
+            "🗑️ Удалить последнюю запись?\n"
+            f"{record.get('Дата и время')} | {record.get('Категория')} | "
+            f"{record.get('Сумма')} | {record.get('Описание')}",
+            reply_markup=delete_confirm_keyboard(),
+        )
+        return
+
+    items = sheets.recent_expense_rows(chat_id, limit=10, include_all=False)
+    if not items:
+        telegram.send_message(chat_id, "📭 У вас нет операций для удаления.")
+        return
+    sheets.set_state(chat_id, STATE_DELETE_SELECT, {})
+    telegram.send_message(
+        chat_id,
+        "🗑️ Выберите операцию. Запрос на удаление будет отправлен администратору:",
+        reply_markup=delete_records_keyboard(items),
+    )
+
+
 def send_start(chat_id, telegram):
     telegram.send_message(
         chat_id,
         "👋 Привет! Я помогу учитывать расходы в Google Sheets.",
-        reply_markup=main_menu_keyboard(),
+        reply_markup=main_menu_keyboard(include_balance=is_admin_chat(chat_id)),
     )
 
 
 def send_balance(chat_id, telegram):
-    rows = sheets.all_expenses()
     if not is_admin_chat(chat_id):
-        rows = [row for row in rows if str(row.get("Chat ID", "")) == str(chat_id)]
-    telegram.send_message(chat_id, reports.balance_text(rows, env_timezone()))
+        telegram.send_message(chat_id, "🔒 Остатки доступны только администраторам.")
+        return
+    telegram.send_message(chat_id, reports.balance_text(sheets.all_expenses(), env_timezone()))
 
 
 def send_help(chat_id, telegram):
-    telegram.send_message(
-        chat_id,
-        "\n".join(
+    commands = [
+        "📋 Команды:",
+        "➕ /add - добавить операцию",
+        "📅 /today - отчет за сегодня",
+        "🗓️ /week - отчет за последние 7 дней",
+        "📆 /month - отчет за текущий месяц",
+        "📜 /history - последние 20 операций",
+        "✏️ /edit - изменить один из последних 30 платежей",
+        "🔄 /status - изменить статус одной из последних 30 операций",
+        "🗑️ /delete_last - запросить удаление одной из последних 10 операций",
+        "🕒 /time - текущее время Europe/Moscow",
+        "🆔 /id - показать chat_id",
+    ]
+    if is_admin_chat(chat_id):
+        commands.extend(
             [
-                "📋 Команды:",
-                "➕ /add - добавить операцию",
-                "📅 /today - отчет за сегодня",
-                "🗓️ /week - отчет за последние 7 дней",
-                "📆 /month - отчет за текущий месяц",
-                "📜 /history - последние 20 операций",
                 "💰 /balance - текущие остатки карты и наличных",
-                "✏️ /edit - изменить один из последних 30 платежей",
-                "🔄 /status - изменить статус одной из последних 30 операций",
-                "🗑️ /delete_last - удалить последнюю запись",
-                "🕒 /time - текущее время Europe/Moscow",
-                "🆔 /id - показать chat_id",
                 "🛠️ /debug - диагностика для администратора",
                 "🧹 /repair_operations - исправить сдвинутые строки Operations",
             ]
-        ),
-    )
+        )
+    telegram.send_message(chat_id, "\n".join(commands))
 
 
 def build_expense(data, chat_id):
@@ -358,19 +395,7 @@ def handle_command(chat_id, command, telegram):
     elif command == "/edit":
         start_edit_flow(chat_id, telegram)
     elif command == "/delete_last":
-        items = sheets.recent_expense_rows(chat_id, limit=1, include_all=is_admin_chat(chat_id))
-        if not items:
-            telegram.send_message(chat_id, "📭 Нет записей для удаления.")
-            return
-        row_number = items[0]["row_number"]
-        record = items[0]["record"]
-        sheets.set_state(chat_id, STATE_DELETE_CONFIRM, {"row_number": row_number, "record": record})
-        telegram.send_message(
-            chat_id,
-            "🗑️ Удалить последнюю запись?\n"
-            f"{record.get('Дата и время')} | {record.get('Категория')} | {record.get('Сумма')} | {record.get('Описание')}",
-            reply_markup=delete_confirm_keyboard(),
-        )
+        start_delete_flow(chat_id, telegram)
     elif command == "/time":
         now = reports.now_in_timezone(tz_name)
         telegram.send_message(chat_id, f"{now.strftime('%Y-%m-%d %H:%M:%S')} {tz_name}")
@@ -500,7 +525,11 @@ def handle_message(message, telegram):
             sheets.set_state(chat_id, STATE_CATEGORY, data)
             telegram.send_message(chat_id, "🏷️ Выберите категорию:", reply_markup=category_keyboard())
     else:
-        telegram.send_message(chat_id, "👇 Выберите действие в меню или отправьте /add.", reply_markup=main_menu_keyboard())
+        telegram.send_message(
+            chat_id,
+            "👇 Выберите действие в меню или отправьте /add.",
+            reply_markup=main_menu_keyboard(include_balance=is_admin_chat(chat_id)),
+        )
 
 
 def handle_callback(callback, telegram):
@@ -532,6 +561,8 @@ def handle_callback(callback, telegram):
             show_report_menu(chat_id, telegram)
         elif command == "balance":
             send_balance(chat_id, telegram)
+        elif command == "delete":
+            start_delete_flow(chat_id, telegram)
         elif command == "status":
             start_status_update_flow(chat_id, telegram)
         elif command == "edit":
@@ -760,6 +791,98 @@ def handle_callback(callback, telegram):
         else:
             sheets.clear_state(chat_id)
             telegram.edit_message_text(chat_id, message_id, "⚠️ Не удалось отменить запись: она уже изменена или удалена.")
+        return
+
+    if data_value.startswith("delete_row:") and state == STATE_DELETE_SELECT:
+        row_number = int(data_value.split(":", 1)[1])
+        record = sheets.get_expense_row(row_number)
+        if not record or str(record.get("Chat ID", "")) != str(chat_id):
+            sheets.clear_state(chat_id)
+            telegram.edit_message_text(chat_id, message_id, "⚠️ Эта операция не найдена или вам не принадлежит.")
+            return
+        sheets.set_state(
+            chat_id,
+            STATE_DELETE_CONFIRM,
+            {"row_number": row_number, "record": record, "requires_approval": True},
+        )
+        telegram.edit_message_text(
+            chat_id,
+            message_id,
+            "📨 Отправить администратору запрос на удаление?\n"
+            f"{record.get('Дата и время')} | {record.get('Категория')} | "
+            f"{record.get('Сумма')} ₽ | {record.get('Описание')}",
+            reply_markup=delete_request_keyboard(),
+        )
+        return
+
+    if data_value == "delete:request" and state == STATE_DELETE_CONFIRM and data.get("requires_approval"):
+        row_number = data.get("row_number")
+        record = data.get("record", {})
+        if not row_number or str(record.get("Chat ID", "")) != str(chat_id):
+            sheets.clear_state(chat_id)
+            telegram.edit_message_text(chat_id, message_id, "⚠️ Не удалось сформировать запрос.")
+            return
+        admins = admin_chat_ids()
+        if not admins:
+            telegram.edit_message_text(chat_id, message_id, "⚠️ Администратор не настроен.")
+            return
+        sheets.set_state(
+            chat_id,
+            STATE_DELETE_APPROVAL,
+            {"row_number": row_number, "record": record},
+        )
+        request_text = (
+            "🗑️ Запрос на удаление операции\n"
+            f"🆔 Пользователь: {chat_id}\n"
+            f"📌 Строка: {row_number}\n"
+            f"🕒 {record.get('Дата и время')}\n"
+            f"📌 {record.get('Тип операции')} | {record.get('Тип оплаты')}\n"
+            f"🏷️ {record.get('Категория')}\n"
+            f"💰 {record.get('Сумма')} ₽\n"
+            f"📝 {record.get('Описание')}"
+        )
+        for admin_id in admins:
+            try:
+                telegram.send_message(
+                    admin_id,
+                    request_text,
+                    reply_markup=delete_approval_keyboard(chat_id),
+                )
+            except TelegramError as exc:
+                print(f"Delete approval notification failed for {admin_id}: {exc}", flush=True)
+        telegram.edit_message_text(chat_id, message_id, "⏳ Запрос отправлен администраторам.")
+        return
+
+    if data_value.startswith("delete_approval:"):
+        parts = data_value.split(":", 2)
+        if len(parts) != 3 or not is_admin_chat(chat_id):
+            telegram.edit_message_text(chat_id, message_id, "🔒 Решение доступно только администратору.")
+            return
+        decision, owner_chat_id = parts[1], parts[2]
+        owner_state = sheets.get_state(owner_chat_id)
+        owner_data = owner_state.get("data", {})
+        if owner_state.get("state") != STATE_DELETE_APPROVAL:
+            telegram.edit_message_text(chat_id, message_id, "ℹ️ Запрос уже обработан или отменен.")
+            return
+        row_number = owner_data.get("row_number")
+        record = owner_data.get("record", {})
+        if decision == "approve":
+            deleted = bool(
+                row_number
+                and str(record.get("Chat ID", "")) == str(owner_chat_id)
+                and sheets.delete_expense_row_if_matches(int(row_number), record)
+            )
+            sheets.clear_state(owner_chat_id)
+            if deleted:
+                telegram.edit_message_text(chat_id, message_id, "✅ Удаление разрешено. Операция удалена.")
+                telegram.send_message(owner_chat_id, "✅ Администратор разрешил удаление. Операция удалена.")
+            else:
+                telegram.edit_message_text(chat_id, message_id, "⚠️ Операция изменилась или уже удалена.")
+                telegram.send_message(owner_chat_id, "⚠️ Не удалось удалить операцию: она изменилась или уже удалена.")
+        elif decision == "reject":
+            sheets.clear_state(owner_chat_id)
+            telegram.edit_message_text(chat_id, message_id, "❌ Запрос на удаление отклонен.")
+            telegram.send_message(owner_chat_id, "❌ Администратор отклонил удаление операции.")
         return
 
     if data_value == "delete:confirm" and state == STATE_DELETE_CONFIRM:
