@@ -19,7 +19,7 @@ from keyboards.inline import (
     edit_fields_keyboard,
     edit_payment_keyboard,
     edit_records_keyboard,
-    main_menu_keyboard,
+    main_reply_keyboard,
     operation_type_keyboard,
     payment_keyboard,
     report_keyboard,
@@ -190,7 +190,7 @@ def send_start(chat_id, telegram):
     telegram.send_message(
         chat_id,
         "👋 Привет! Я помогу учитывать расходы в Google Sheets.",
-        reply_markup=main_menu_keyboard(include_balance=is_admin_chat(chat_id)),
+        reply_markup=main_reply_keyboard(include_balance=is_admin_chat(chat_id)),
     )
 
 
@@ -457,6 +457,34 @@ def handle_message(message, telegram):
         handle_command(chat_id, text.split()[0], telegram)
         return
 
+    if text == "➕ Добавить операцию":
+        start_add_flow(chat_id, telegram)
+        return
+    if text == "📊 Отчет":
+        show_report_menu(chat_id, telegram)
+        return
+    if text == "📜 История":
+        telegram.send_message(
+            chat_id,
+            reports.history_text(sheets.all_expenses(), chat_id, include_all=is_admin_chat(chat_id)),
+        )
+        return
+    if text == "🗑️ Удалить":
+        start_delete_flow(chat_id, telegram)
+        return
+    if text == "✏️ Изменить":
+        start_edit_flow(chat_id, telegram)
+        return
+    if text == "🔁 Статус":
+        start_status_update_flow(chat_id, telegram)
+        return
+    if text == "💰 Остатки":
+        send_balance(chat_id, telegram)
+        return
+    if text == "ℹ️ Помощь":
+        send_help(chat_id, telegram)
+        return
+
     current = sheets.get_state(chat_id)
     state = current["state"]
     data = current["data"]
@@ -528,7 +556,7 @@ def handle_message(message, telegram):
         telegram.send_message(
             chat_id,
             "👇 Выберите действие в меню или отправьте /add.",
-            reply_markup=main_menu_keyboard(include_balance=is_admin_chat(chat_id)),
+            reply_markup=main_reply_keyboard(include_balance=is_admin_chat(chat_id)),
         )
 
 
