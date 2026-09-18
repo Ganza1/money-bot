@@ -9,15 +9,16 @@ def inline_keyboard(rows):
     return {"inline_keyboard": rows}
 
 
-def main_menu_keyboard():
-    return inline_keyboard(
-        [
-            [button("➕ Добавить операцию", "cmd:add"), button("📊 Отчет", "cmd:report")],
-            [button("📜 История", "cmd:history"), button("💰 Остатки", "cmd:balance")],
-            [button("✏️ Изменить", "cmd:edit"), button("🔁 Статус", "cmd:status")],
-            [button("ℹ Помощь", "cmd:help")],
-        ]
-    )
+def main_menu_keyboard(include_balance=False):
+    rows = [
+        [button("➕ Добавить операцию", "cmd:add"), button("📊 Отчет", "cmd:report")],
+        [button("📜 История", "cmd:history"), button("🗑️ Удалить", "cmd:delete")],
+        [button("✏️ Изменить", "cmd:edit"), button("🔁 Статус", "cmd:status")],
+    ]
+    if include_balance:
+        rows.append([button("💰 Остатки", "cmd:balance")])
+    rows.append([button("ℹ Помощь", "cmd:help")])
+    return inline_keyboard(rows)
 
 
 def operation_type_keyboard(include_admin_operations=False):
@@ -207,6 +208,40 @@ def report_keyboard():
         [
             [button("Сегодня", "report:today"), button("7 дней", "report:week")],
             [button("Месяц", "report:month")],
+        ]
+    )
+
+
+
+def delete_records_keyboard(items):
+    rows = []
+    for index, item in enumerate(items, start=1):
+        record = item["record"]
+        label = (
+            f"{index}. {record.get('Дата и время', '')} | "
+            f"{record.get('Сумма', '')} ₽ | {record.get('Описание', '')}"
+        )
+        if len(label) > 60:
+            label = label[:57] + "..."
+        rows.append([button(label, f"delete_row:{item['row_number']}")])
+    rows.append([button("❌ Отмена", "delete:cancel")])
+    return inline_keyboard(rows)
+
+
+def delete_request_keyboard():
+    return inline_keyboard(
+        [
+            [button("📨 Отправить администратору", "delete:request")],
+            [button("❌ Отмена", "delete:cancel")],
+        ]
+    )
+
+
+def delete_approval_keyboard(owner_chat_id):
+    return inline_keyboard(
+        [
+            [button("✅ Разрешить удаление", f"delete_approval:approve:{owner_chat_id}")],
+            [button("❌ Отклонить", f"delete_approval:reject:{owner_chat_id}")],
         ]
     )
 
