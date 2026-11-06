@@ -301,6 +301,49 @@ def summarize_gto(rows):
     return result
 
 
+
+def gto_detail_messages(rows, title):
+    gto_rows = [row for row in rows if is_gto_expense(row)]
+    if not gto_rows:
+        return [f"🏅 {title}\n\nЗа выбранный период операций ГТО нет."]
+
+    groups = summarize_gto(gto_rows)
+    header_lines = [f"🏅 {title}", "", f"📌 Операций: {len(gto_rows)}"]
+    for status, item in groups.items():
+        if item["count"]:
+            header_lines.append(
+                f"{status_label(status)}: {format_amount(item['amount'])} ₽ ({item['count']})"
+            )
+    header_lines.extend(["", "📋 Операции:"])
+
+    messages = []
+    current_lines = header_lines
+    continuation = 1
+    for row in reversed(gto_rows):
+        status = clean_text(row.get("Статус")) or "Без статуса"
+        payment = payment_group(row)
+        bank = clean_text(row.get("Банк"))
+        payment_details = f"{payment}" + (f", {bank}" if bank else "")
+        line = (
+            f"\n🕒 {row.get('Дата и время')}\n"
+            f"{status_label(status)} | 💰 {format_amount(parse_amount(row.get('Сумма')))} ₽\n"
+            f"🏷️ {row.get('Категория')} | 💳 {payment_details}\n"
+            f"📝 {row.get('Описание')}"
+        )
+        if len(line) > 3000:
+            line = line[:2997] + "..."
+        candidate = "\n".join([*current_lines, line])
+        if len(candidate) > 3600 and len(current_lines) > len(header_lines):
+            messages.append("\n".join(current_lines))
+            continuation += 1
+            current_lines = [f"🏅 {title} — продолжение {continuation}", line]
+        else:
+            current_lines.append(line)
+    if current_lines:
+        messages.append("\n".join(current_lines))
+    return messages
+
+
 def report_text(title, rows, balance_rows=None):
     summary = summarize(rows)
     balance_summary = summarize(rows if balance_rows is None else balance_rows)
