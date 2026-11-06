@@ -227,6 +227,7 @@ def report_keyboard():
         [
             [button("Сегодня", "report:today"), button("7 дней", "report:week")],
             [button("Месяц", "report:month")],
+            [button("📅 Произвольный период", "report:custom")],
         ]
     )
 
