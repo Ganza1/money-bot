@@ -1,4 +1,5 @@
 from collections import OrderedDict
+import re
 from datetime import datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 from zoneinfo import ZoneInfo
@@ -264,26 +265,74 @@ def pending_and_rejected_text(rows):
     return lines
 
 
-def report_text(title, rows):
+
+def is_gto_expense(row):
+    if operation_type(row) != OPERATION_EXPENSE:
+        return False
+    searchable = f"{clean_text(row.get('Категория'))} {clean_text(row.get('Описание'))}"
+    return bool(re.search(r"(?<![0-9a-zа-я])гто(?![0-9a-zа-я])", searchable.casefold()))
+
+
+def summarize_gto(rows):
+    result = OrderedDict(
+        (
+            status,
+            {"amount": Decimal("0"), "count": 0},
+        )
+        for status in ("Оплачен", "На рассмотрении", "Отказ", "Без статуса")
+    )
+    for row in rows:
+        if not is_gto_expense(row):
+            continue
+        raw_status = clean_text(row.get("Статус"))
+        lookup = clean_lookup(raw_status)
+        if lookup in PAID_STATUS_ALIASES:
+            status = "Оплачен"
+        elif lookup == "на рассмотрении":
+            status = "На рассмотрении"
+        elif lookup == "отказ":
+            status = "Отказ"
+        else:
+            status = raw_status or "Без статуса"
+        if status not in result:
+            result[status] = {"amount": Decimal("0"), "count": 0}
+        result[status]["amount"] += parse_amount(row.get("Сумма"))
+        result[status]["count"] += 1
+    return result
+
+
+def report_text(title, rows, balance_rows=None):
     summary = summarize(rows)
+    balance_summary = summarize(rows if balance_rows is None else balance_rows)
     status_groups, status_counts = summarize_statuses(rows)
+    gto_groups = summarize_gto(rows)
     lines = [f"📊 {title}", "", "💵 Финансовые итоги считаются только по статусу Оплачен.", ""]
     lines.extend(
         [
-            f"📈 Доходы всего: {format_amount(summary['income_total'])} ₽",
-            f"📉 Расходы всего: {format_amount(summary['expense_total'])} ₽",
-            f"🧮 Общий итог: {format_amount(summary['net_total'])} ₽",
+            f"📈 Доходы за период: {format_amount(summary['income_total'])} ₽",
+            f"📉 Расходы за период: {format_amount(summary['expense_total'])} ₽",
+            f"🧮 Итог за период: {format_amount(summary['net_total'])} ₽",
             "",
-            f"🏦 Баланс карты: {format_amount(summary['card_balance'])} ₽",
-            f"💵 Баланс наличных: {format_amount(summary['cash_balance'])} ₽",
-            f"💰 Общий баланс: {format_amount(summary['total_balance'])} ₽",
+            "💳 Текущие остатки:",
+            f"🏦 Карта: {format_amount(balance_summary['card_balance'])} ₽",
+            f"💵 Наличные: {format_amount(balance_summary['cash_balance'])} ₽",
+            f"💰 Общий остаток: {format_amount(balance_summary['total_balance'])} ₽",
             "",
-            f"🔁 Переводы: {format_amount(summary['transfer_total'])} ₽ ({summary['transfer_count']})",
-            f"📌 Операций: {len(rows)}",
+            f"🔁 Переводы за период: {format_amount(summary['transfer_total'])} ₽ ({summary['transfer_count']})",
+            f"📌 Операций за период: {len(rows)}",
             "",
-            "🔄 По статусам:",
+            "🏅 Расходы на ГТО за период:",
         ]
     )
+    if any(item["count"] for item in gto_groups.values()):
+        for status, item in gto_groups.items():
+            if item["count"]:
+                lines.append(
+                    f"{status_label(status)}: {format_amount(item['amount'])} ₽ ({item['count']})"
+                )
+    else:
+        lines.append("Нет операций ГТО.")
+    lines.extend(["", "🔄 По статусам:"])
     for status, amount in status_groups.items():
         count = status_counts.get(status, 0)
         if count:
@@ -362,9 +411,18 @@ def previous_month_range(tz_name):
 
 
 def build_period_report(rows, title, start_dt, end_dt, tz_name, chat_id=None):
-    filtered = filter_rows(rows, start_dt, end_dt, tz_name, chat_id=chat_id)
-    period = f"{start_dt.strftime('%Y-%m-%d %H:%M')} - {end_dt.strftime('%Y-%m-%d %H:%M')} {tz_name}"
-    return report_text(f"{title}\n{period}", filtered)
+    visible_rows = rows
+    if chat_id is not None:
+        visible_rows = [
+            row for row in rows if str(row.get("Chat ID", "")) == str(chat_id)
+        ]
+    filtered = filter_rows(visible_rows, start_dt, end_dt, tz_name)
+    inclusive_end = end_dt - timedelta(seconds=1)
+    period = (
+        f"{start_dt.strftime('%d.%m.%Y')} - "
+        f"{inclusive_end.strftime('%d.%m.%Y')} {tz_name}"
+    )
+    return report_text(f"{title}\n{period}", filtered, balance_rows=visible_rows)
 
 
 def history_text(rows, chat_id, limit=20, include_all=False):
