@@ -19,6 +19,7 @@ from keyboards.inline import (
     edit_fields_keyboard,
     edit_payment_keyboard,
     edit_records_keyboard,
+    gto_detail_keyboard,
     main_reply_keyboard,
     operation_type_keyboard,
     payment_keyboard,
@@ -389,17 +390,14 @@ def handle_command(chat_id, command, telegram):
     elif command == "/add":
         start_add_flow(chat_id, telegram)
     elif command == "/today":
-        rows = sheets.all_expenses()
         start, end = reports.today_range(tz_name)
-        telegram.send_message(chat_id, reports.build_period_report(rows, "Отчет за сегодня", start, end, tz_name, None if is_admin_chat(chat_id) else chat_id))
+        send_period_report(chat_id, telegram, "Отчет за сегодня", start, end)
     elif command == "/week":
-        rows = sheets.all_expenses()
         start, end = reports.last_7_days_range(tz_name)
-        telegram.send_message(chat_id, reports.build_period_report(rows, "Отчет за последние 7 дней", start, end, tz_name, None if is_admin_chat(chat_id) else chat_id))
+        send_period_report(chat_id, telegram, "Отчет за последние 7 дней", start, end)
     elif command == "/month":
-        rows = sheets.all_expenses()
         start, end = reports.current_month_range(tz_name)
-        telegram.send_message(chat_id, reports.build_period_report(rows, "Отчет за текущий месяц", start, end, tz_name, None if is_admin_chat(chat_id) else chat_id))
+        send_period_report(chat_id, telegram, "Отчет за текущий месяц", start, end)
     elif command == "/history":
         telegram.send_message(chat_id, reports.history_text(sheets.all_expenses(), chat_id, include_all=is_admin_chat(chat_id)))
     elif command == "/period":
@@ -461,6 +459,25 @@ def handle_command(chat_id, command, telegram):
     else:
         telegram.send_message(chat_id, "❓ Неизвестная команда. Нажмите /help.")
 
+
+
+
+def send_period_report(chat_id, telegram, title, start_dt, end_dt):
+    tz_name = env_timezone()
+    rows = sheets.all_expenses()
+    text = reports.build_period_report(
+        rows,
+        title,
+        start_dt,
+        end_dt,
+        tz_name,
+        None if is_admin_chat(chat_id) else chat_id,
+    )
+    telegram.send_message(
+        chat_id,
+        text,
+        reply_markup=gto_detail_keyboard(start_dt, end_dt),
+    )
 
 
 def start_custom_report(chat_id, telegram, message_id=None):
@@ -542,17 +559,14 @@ def handle_message(message, telegram):
         tz_name = env_timezone()
         start_dt = datetime.combine(start_date, time.min, tzinfo=reports.timezone(tz_name))
         end_dt = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=reports.timezone(tz_name))
-        rows = sheets.all_expenses()
-        report = reports.build_period_report(
-            rows,
+        sheets.clear_state(chat_id)
+        send_period_report(
+            chat_id,
+            telegram,
             "Отчет за произвольный период",
             start_dt,
             end_dt,
-            tz_name,
-            None if is_admin_chat(chat_id) else chat_id,
         )
-        sheets.clear_state(chat_id)
-        telegram.send_message(chat_id, report)
         return
 
     if state == STATE_EDIT_TEXT:
@@ -669,17 +683,45 @@ def handle_callback(callback, telegram):
             start_custom_report(chat_id, telegram, message_id=message_id)
             return
         tz_name = env_timezone()
-        rows = sheets.all_expenses()
         if report_type == "today":
             start, end = reports.today_range(tz_name)
-            text = reports.build_period_report(rows, "Отчет за сегодня", start, end, tz_name, None if is_admin_chat(chat_id) else chat_id)
+            title = "Отчет за сегодня"
         elif report_type == "week":
             start, end = reports.last_7_days_range(tz_name)
-            text = reports.build_period_report(rows, "Отчет за последние 7 дней", start, end, tz_name, None if is_admin_chat(chat_id) else chat_id)
+            title = "Отчет за последние 7 дней"
         else:
             start, end = reports.current_month_range(tz_name)
-            text = reports.build_period_report(rows, "Отчет за текущий месяц", start, end, tz_name, None if is_admin_chat(chat_id) else chat_id)
-        telegram.send_message(chat_id, text)
+            title = "Отчет за текущий месяц"
+        send_period_report(chat_id, telegram, title, start, end)
+        return
+
+    if data_value.startswith("gto_detail:"):
+        try:
+            _, start_value, end_value = data_value.split(":", 2)
+            tz_name = env_timezone()
+            tz = reports.timezone(tz_name)
+            start_dt = datetime.fromtimestamp(int(start_value), tz=tz)
+            end_dt = datetime.fromtimestamp(int(end_value), tz=tz)
+            if end_dt <= start_dt:
+                raise ValueError("invalid period")
+        except (TypeError, ValueError, OverflowError):
+            telegram.send_message(chat_id, "⚠️ Не удалось определить период отчета. Сформируйте отчет заново.")
+            return
+        rows = sheets.all_expenses()
+        filtered = reports.filter_rows(
+            rows,
+            start_dt,
+            end_dt,
+            tz_name,
+            chat_id=None if is_admin_chat(chat_id) else chat_id,
+        )
+        inclusive_end = end_dt - timedelta(seconds=1)
+        title = (
+            "Детализация расходов ГТО\n"
+            f"{start_dt.strftime('%d.%m.%Y')} - {inclusive_end.strftime('%d.%m.%Y')}"
+        )
+        for detail_message in reports.gto_detail_messages(filtered, title):
+            telegram.send_message(chat_id, detail_message)
         return
 
     if data_value.startswith("operation:") and state == STATE_OPERATION_TYPE:
