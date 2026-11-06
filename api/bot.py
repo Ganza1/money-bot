@@ -2,7 +2,7 @@ import json
 import os
 import traceback
 from decimal import Decimal, InvalidOperation
-from datetime import datetime
+from datetime import datetime, time, timedelta
 from http.server import BaseHTTPRequestHandler
 
 from keyboards.inline import (
@@ -50,6 +50,8 @@ from states.constants import (
     STATE_EDIT_FIELD,
     STATE_EDIT_TEXT,
     STATE_PAYMENT_TYPE,
+    STATE_REPORT_DATE_FROM,
+    STATE_REPORT_DATE_TO,
     STATE_TRANSFER_DIRECTION,
     STATE_STATUS,
     STATE_STATUS_UPDATE,
@@ -107,6 +109,17 @@ def parse_amount(text):
     if "." in formatted:
         formatted = formatted.rstrip("0").rstrip(".")
     return formatted
+
+
+
+def parse_report_date(text):
+    value = str(text or "").strip()
+    for date_format in ("%d.%m.%Y", "%Y-%m-%d", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(value, date_format).date()
+        except ValueError:
+            pass
+    return None
 
 
 def row_number_from_append_result(result):
@@ -209,6 +222,7 @@ def send_help(chat_id, telegram):
         "🗓️ /week - отчет за последние 7 дней",
         "📆 /month - отчет за текущий месяц",
         "📜 /history - последние 20 операций",
+        "📅 /period - отчет за произвольный период",
         "✏️ /edit - изменить один из последних 30 платежей",
         "🔄 /status - изменить статус одной из последних 30 операций",
         "🗑️ /delete_last - запросить удаление одной из последних 10 операций",
@@ -388,6 +402,8 @@ def handle_command(chat_id, command, telegram):
         telegram.send_message(chat_id, reports.build_period_report(rows, "Отчет за текущий месяц", start, end, tz_name, None if is_admin_chat(chat_id) else chat_id))
     elif command == "/history":
         telegram.send_message(chat_id, reports.history_text(sheets.all_expenses(), chat_id, include_all=is_admin_chat(chat_id)))
+    elif command == "/period":
+        start_custom_report(chat_id, telegram)
     elif command in ("/balance", "/ostatki"):
         send_balance(chat_id, telegram)
     elif command == "/status":
@@ -446,6 +462,16 @@ def handle_command(chat_id, command, telegram):
         telegram.send_message(chat_id, "❓ Неизвестная команда. Нажмите /help.")
 
 
+
+def start_custom_report(chat_id, telegram, message_id=None):
+    sheets.set_state(chat_id, STATE_REPORT_DATE_FROM, {})
+    text = "📅 Введите начальную дату в формате ДД.ММ.ГГГГ:"
+    if message_id:
+        telegram.edit_message_text(chat_id, message_id, text)
+    else:
+        telegram.send_message(chat_id, text)
+
+
 def show_report_menu(chat_id, telegram):
     telegram.send_message(chat_id, "📊 Выберите отчет:", reply_markup=report_keyboard())
 
@@ -488,6 +514,46 @@ def handle_message(message, telegram):
     current = sheets.get_state(chat_id)
     state = current["state"]
     data = current["data"]
+
+    if state == STATE_REPORT_DATE_FROM:
+        start_date = parse_report_date(text)
+        if not start_date:
+            telegram.send_message(chat_id, "⚠️ Не удалось распознать дату. Введите ее как ДД.ММ.ГГГГ, например 01.11.2026.")
+            return
+        sheets.set_state(
+            chat_id,
+            STATE_REPORT_DATE_TO,
+            {"start_date": start_date.isoformat()},
+        )
+        telegram.send_message(chat_id, "📅 Введите конечную дату в формате ДД.ММ.ГГГГ:")
+        return
+    if state == STATE_REPORT_DATE_TO:
+        end_date = parse_report_date(text)
+        try:
+            start_date = datetime.strptime(data.get("start_date", ""), "%Y-%m-%d").date()
+        except ValueError:
+            start_date = None
+        if not start_date or not end_date:
+            telegram.send_message(chat_id, "⚠️ Не удалось распознать дату. Начните заново: /period")
+            return
+        if end_date < start_date:
+            telegram.send_message(chat_id, "⚠️ Конечная дата не может быть раньше начальной. Введите конечную дату еще раз.")
+            return
+        tz_name = env_timezone()
+        start_dt = datetime.combine(start_date, time.min, tzinfo=reports.timezone(tz_name))
+        end_dt = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=reports.timezone(tz_name))
+        rows = sheets.all_expenses()
+        report = reports.build_period_report(
+            rows,
+            "Отчет за произвольный период",
+            start_dt,
+            end_dt,
+            tz_name,
+            None if is_admin_chat(chat_id) else chat_id,
+        )
+        sheets.clear_state(chat_id)
+        telegram.send_message(chat_id, report)
+        return
 
     if state == STATE_EDIT_TEXT:
         row_number = data.get("row_number")
@@ -598,9 +664,12 @@ def handle_callback(callback, telegram):
         return
 
     if data_value.startswith("report:"):
+        report_type = data_value.split(":", 1)[1]
+        if report_type == "custom":
+            start_custom_report(chat_id, telegram, message_id=message_id)
+            return
         tz_name = env_timezone()
         rows = sheets.all_expenses()
-        report_type = data_value.split(":", 1)[1]
         if report_type == "today":
             start, end = reports.today_range(tz_name)
             text = reports.build_period_report(rows, "Отчет за сегодня", start, end, tz_name, None if is_admin_chat(chat_id) else chat_id)
