@@ -15,6 +15,8 @@ STATE_DELETE_APPROVAL = "delete_approval"
 STATE_STATUS_UPDATE = "status_update"
 STATE_EDIT_FIELD = "edit_field"
 STATE_EDIT_TEXT = "edit_text"
+STATE_REPORT_DATE_FROM = "report_date_from"
+STATE_REPORT_DATE_TO = "report_date_to"
 STATE_UNDO_SAVED = "undo_saved"
 
 OPERATION_INCOME = "Доход"
