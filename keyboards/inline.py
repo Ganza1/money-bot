@@ -222,6 +222,22 @@ def saved_keyboard():
     )
 
 
+
+def gto_detail_keyboard(start_dt, end_dt):
+    start_timestamp = int(start_dt.timestamp())
+    end_timestamp = int(end_dt.timestamp())
+    return inline_keyboard(
+        [
+            [
+                button(
+                    "🏅 Детализация ГТО",
+                    f"gto_detail:{start_timestamp}:{end_timestamp}",
+                )
+            ]
+        ]
+    )
+
+
 def report_keyboard():
     return inline_keyboard(
         [
